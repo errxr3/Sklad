@@ -1,6 +1,7 @@
 """Команды управления. Запуск: python -m app.cli <команда> [параметры]
 
 Доступные команды:
+  setup                        подготовить всё к первому запуску
   init-db                      создать базу и завести площадки
   gen-secret                   сгенерировать ключ для .env
   add-employee                 завести сотрудника
@@ -210,6 +211,45 @@ def cmd_seed_test_workers(args: argparse.Namespace) -> int:
     return 0
 
 
+# Справочник, который лежит в репозитории рядом с кодом.
+BUNDLED_CATALOG = BASE_DIR / "docs" / "spravochnik-artikulov.xlsx"
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Подготовить всё к первому запуску. Повторный вызов безопасен.
+
+    Создаёт базу, при необходимости загружает справочник артикулов
+    из репозитория и заводит тестовых сотрудников, если их ещё нет.
+    Уже сделанное не трогает.
+    """
+    init_db()
+    print("База готова.")
+
+    with SessionLocal() as session:
+        articles = session.scalar(select(func.count()).select_from(Article)) or 0
+        employees = session.scalar(select(func.count()).select_from(Employee)) or 0
+
+    if articles:
+        print(f"Справочник артикулов уже загружен: {articles} шт.")
+    elif BUNDLED_CATALOG.exists():
+        with SessionLocal() as session:
+            report = import_articles(session, BUNDLED_CATALOG)
+        print(f"Загружен справочник артикулов: {report.added} шт.")
+    else:
+        print("Справочник не найден, пропускаю. Загрузите его в админ-панели.")
+
+    if employees:
+        print(f"Сотрудники уже заведены: {employees} чел.")
+    else:
+        args.pin = args.pin or "1234"
+        cmd_seed_test_workers(args)
+
+    print()
+    print("Всё готово. Запуск сайта:")
+    print("  python -m uvicorn app.main:app --host 0.0.0.0 --port 8000")
+    return 0
+
+
 def cmd_stats(_args: argparse.Namespace) -> int:
     with SessionLocal() as session:
         articles = session.scalar(select(func.count()).select_from(Article)) or 0
@@ -281,6 +321,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     workers.add_argument("--pin", help="общий PIN для обоих; иначе у каждого свой случайный")
     workers.set_defaults(func=cmd_seed_test_workers)
+
+    setup = subparsers.add_parser(
+        "setup", help="подготовить всё к первому запуску (можно повторять)"
+    )
+    setup.add_argument("--pin", help="PIN тестовых сотрудников, по умолчанию 1234")
+    setup.set_defaults(func=cmd_setup)
 
     subparsers.add_parser("stats", help="сводка по базе").set_defaults(func=cmd_stats)
     return parser
