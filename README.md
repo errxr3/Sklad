@@ -4,7 +4,7 @@
 штрихкодом. Сборщик печатает этикетку, клеит и сканирует — зеркало встаёт
 на склад. При отгрузке его сканируют — оно списывается. Остаток считается сам.
 
-Версия **0.2.0**. Полное задание: [docs/TZ.md](docs/TZ.md).
+Версия **0.2.1**. Полное задание: [docs/TZ.md](docs/TZ.md).
 
 ## Что умеет
 
@@ -119,7 +119,8 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `python -m app.cli add-employee --name "..." --role foreman [--pin 1234]` | завести сотрудника (роли: `assembler`, `loader`, `foreman`, `admin`) |
 | `python -m app.cli set-pin --name "..." [--pin 1234]` | сменить PIN |
 | `python -m app.cli list-employees` | показать сотрудников |
-| `python -m app.cli import-articles TOP.xlsx` | загрузить справочник |
+| `python -m app.cli import-articles ФАЙЛ` | добавить артикулы из файла |
+| `python -m app.cli reset-articles [ФАЙЛ]` | заменить справочник целиком |
 | `python -m app.cli seed-demo-articles` | артикулы для проверки |
 | `python -m app.cli seed-test-workers` | по тестовому сотруднику на каждую роль |
 | `python -m app.cli stats` | сводка по базе |
@@ -179,7 +180,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-112 тестов: нумерация, сравнение артикулов, импорт трёх листов, путь зеркала,
+120 тестов: нумерация, сравнение артикулов, импорт трёх листов, путь зеркала,
 повторный скан, недопустимые переходы, разделение ролей, админ-панель,
 переключение тем, остатки, журнал и сценарии через HTTP.
 Штрихкод на этикетке растеризуется в 203 dpi и декодируется обратно —
