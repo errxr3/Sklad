@@ -100,3 +100,47 @@ def test_импорт_из_csv(db, tmp_path):
         "Alum 500",
         "Zerkalo 600x800",
     ]
+
+
+def test_заголовок_раздела_с_пояснением_не_артикул():
+    """«ПОЛОТНА без креплений» — заголовок, а не позиция справочника."""
+    from app.importer import is_section_title
+
+    assert is_section_title("ПОЛОТНА без креплений")
+    assert is_section_title("АЛЮМИНИЙ на ноге")
+    assert not is_section_title("Zerkalo_100x200")
+    assert not is_section_title("Alum Noga 170x70 black")
+    assert not is_section_title("Ambient 110 круг")
+
+
+def test_csv_с_разделами(db, tmp_path):
+    """Справочник можно хранить плоским файлом, не теряя группировку."""
+    path = tmp_path / "artikuly.csv"
+    path.write_text(
+        "Артикул;Раздел;Лист\n"
+        "Zerkalo_100x200;ПОЛОТНА;Полотна\n"
+        "Zerkalo_60x100_bp;ПОЛОТНА без креплений;Полотна\n"
+        "Ambient 110 круг;БЕЗРАМНЫЕ КРУГЛЫЕ;Безрамные\n",
+        encoding="utf-8",
+    )
+    report = import_articles(db, path)
+    assert report.added == 3
+    rows = {a.code: (a.section, a.source_sheet) for a in db.query(Article).all()}
+    assert rows["Zerkalo_100x200"] == ("ПОЛОТНА", "Полотна")
+    assert rows["Zerkalo_60x100_bp"] == ("ПОЛОТНА без креплений", "Полотна")
+    assert rows["Ambient 110 круг"] == ("БЕЗРАМНЫЕ КРУГЛЫЕ", "Безрамные")
+
+
+def test_повторный_импорт_включает_отключённый_артикул(db, tmp_path):
+    path = tmp_path / "spisok.csv"
+    path.write_text("Zerkalo_100x200\n", encoding="utf-8")
+    import_articles(db, path)
+
+    article = db.query(Article).one()
+    article.is_active = False
+    db.commit()
+
+    report = import_articles(db, path)
+    assert report.restored == 1
+    db.refresh(article)
+    assert article.is_active is True

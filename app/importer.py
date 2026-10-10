@@ -35,18 +35,27 @@ HEADER_WORDS = {
 # Они написаны прописными и не содержат ни цифр, ни латиницы,
 # в отличие от артикулов вида «Zerkalo_100х200».
 def is_section_title(code: str) -> bool:
-    letters = [ch for ch in code if ch.isalpha()]
-    if not letters:
-        return False
+    """Заголовок раздела: «ПОЛОТНА», «ПОЛОТНА без креплений», «АЛЮМИНИЙ на ноге».
+
+    Отличается от артикула тем, что начинается со слова капсом и не
+    содержит цифр, тогда как артикулы — «Zerkalo_100x200», «Alum rama
+    200x100 black» — всегда с размерами и без капса в начале.
+    """
     if any(ch.isdigit() for ch in code):
         return False
-    return all(ch.isupper() for ch in letters)
+    words = code.split()
+    if not words:
+        return False
+    first = [ch for ch in words[0] if ch.isalpha()]
+    # Одной заглавной буквы мало: так начинается любое слово в начале строки.
+    return len(first) > 1 and all(ch.isupper() for ch in first)
 
 
 @dataclass
 class ImportReport:
     added: int = 0
     already: int = 0
+    restored: int = 0
     skipped: int = 0
     per_sheet: dict[str, int] = field(default_factory=dict)
     examples: list[str] = field(default_factory=list)
@@ -61,6 +70,8 @@ class ImportReport:
         return (
             f"Добавлено новых: {self.added}\n"
             f"Уже были в справочнике: {self.already}\n"
+            + (f"Включено обратно: {self.restored}\n" if self.restored else "")
+            +
             f"Пропущено (пусто или заголовок): {self.skipped}\n"
             f"Листы (принято артикулов): {sheets}"
         )
@@ -83,8 +94,12 @@ def _is_meaningful(code: str) -> bool:
     return True
 
 
-def read_codes(path: Path) -> list[tuple[str, str]]:
-    """Прочитать файл и вернуть пары (артикул, имя листа)."""
+def read_codes(path: Path) -> list[tuple[str, str, str]]:
+    """Прочитать файл и вернуть тройки (артикул, лист, раздел).
+
+    Раздел пустой, если файл его не задаёт: тогда берётся заголовок,
+    встреченный выше по листу.
+    """
     suffix = path.suffix.lower()
     if suffix in {".xlsx", ".xlsm"}:
         return _read_xlsx(path)
@@ -93,30 +108,39 @@ def read_codes(path: Path) -> list[tuple[str, str]]:
     raise ValueError(f"Неизвестный формат файла: {path.suffix}. Нужен .xlsx или .csv")
 
 
-def _read_xlsx(path: Path) -> list[tuple[str, str]]:
+def _read_xlsx(path: Path) -> list[tuple[str, str, str]]:
     from openpyxl import load_workbook
 
-    rows: list[tuple[str, str]] = []
+    rows: list[tuple[str, str, str]] = []
     workbook = load_workbook(filename=path, read_only=True, data_only=True)
     try:
         for sheet in workbook.worksheets:
             for (value,) in sheet.iter_rows(min_col=1, max_col=1, values_only=True):
-                rows.append((normalize_code(value), sheet.title))
+                rows.append((normalize_code(value), sheet.title, ""))
     finally:
         workbook.close()
     return rows
 
 
-def _read_csv(path: Path) -> list[tuple[str, str]]:
-    """CSV или простой текстовый список: артикул — первый столбец."""
-    rows: list[tuple[str, str]] = []
+def _read_csv(path: Path) -> list[tuple[str, str, str]]:
+    """CSV или простой список.
+
+    Первый столбец — артикул. Если есть второй и третий, это раздел
+    и лист: так справочник можно хранить плоским файлом, не теряя
+    группировку для таблицы остатков.
+    """
+    rows: list[tuple[str, str, str]] = []
     with path.open(newline="", encoding="utf-8-sig") as handle:
         sample = handle.readline()
         handle.seek(0)
         delimiter = ";" if sample.count(";") > sample.count(",") else ","
         for record in csv.reader(handle, delimiter=delimiter):
-            if record:
-                rows.append((normalize_code(record[0]), path.stem))
+            if not record:
+                continue
+            code = normalize_code(record[0])
+            section = normalize_code(record[1]) if len(record) > 1 else ""
+            sheet = normalize_code(record[2]) if len(record) > 2 else path.stem
+            rows.append((code, sheet or path.stem, section))
     return rows
 
 
@@ -126,14 +150,15 @@ def import_articles(session: Session, path: Path) -> ImportReport:
     seen_in_file: set[str] = set()
 
     existing = {
-        key for (key,) in session.execute(select(Article.code_key)).all()
+        article.code_key: article
+        for article in session.scalars(select(Article)).all()
     }
 
     order_in_sheet: dict[str, int] = {}
     # Заголовок раздела действует до следующего заголовка на том же листе.
     section_of_sheet: dict[str, str] = {}
 
-    for code, sheet in read_codes(path):
+    for code, sheet, explicit_section in read_codes(path):
         if is_section_title(code):
             section_of_sheet[sheet] = code
             report.skipped += 1
@@ -145,19 +170,33 @@ def import_articles(session: Session, path: Path) -> ImportReport:
             continue
         key = match_key(code)
         report.per_sheet[sheet] = report.per_sheet.get(sheet, 0) + 1
-        if key in seen_in_file or key in existing:
+        if key in seen_in_file:
             report.already += 1
             continue
         seen_in_file.add(key)
         position = order_in_sheet.get(sheet, 0) + 1
         order_in_sheet[sheet] = position
+
+        known = existing.get(key)
+        if known is not None:
+            # Артикул уже заведён: освежаем раздел и порядок, а если он
+            # был отключён — возвращаем в строй, раз файл его содержит.
+            known.source_sheet = sheet
+            known.section = explicit_section or section_of_sheet.get(sheet)
+            known.sort_order = position
+            if not known.is_active:
+                known.is_active = True
+                report.restored += 1
+            else:
+                report.already += 1
+            continue
         session.add(
             Article(
                 code=code,
                 code_key=key,
                 group_letters=group_letters(code),
                 source_sheet=sheet,
-                section=section_of_sheet.get(sheet),
+                section=explicit_section or section_of_sheet.get(sheet),
                 sort_order=position,
             )
         )

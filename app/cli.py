@@ -7,7 +7,8 @@
   add-employee                 завести сотрудника
   set-pin                      сменить PIN сотрудника
   list-employees               показать сотрудников
-  import-articles ФАЙЛ         загрузить справочник из TOP.xlsx или CSV
+  import-articles ФАЙЛ         добавить артикулы из файла
+  reset-articles [ФАЙЛ]        заменить справочник целиком
   seed-demo-articles           завести несколько артикулов для проверки
   seed-test-workers            завести тестовых сотрудников на каждую роль
   stats                        сводка по базе
@@ -221,6 +222,48 @@ def cmd_seed_test_workers(args: argparse.Namespace) -> int:
 BUNDLED_CATALOG = BASE_DIR / "docs" / "spravochnik-artikulov.xlsx"
 
 
+def _drop_articles(session) -> tuple[int, int]:
+    """Убрать старый справочник. Возвращает (удалено, отключено).
+
+    Артикулы, на которые уже заведены зеркала, не удаляем — иначе
+    порвётся история. Такие просто отключаем: из выбора при печати
+    они пропадают, а журнал остаётся читаемым.
+    """
+    used = {
+        article_id
+        for (article_id,) in session.execute(select(Mirror.article_id).distinct()).all()
+    }
+    removed = disabled = 0
+    for article in session.scalars(select(Article)).all():
+        if article.id in used:
+            if article.is_active:
+                article.is_active = False
+                disabled += 1
+        else:
+            session.delete(article)
+            removed += 1
+    session.commit()
+    return removed, disabled
+
+
+def cmd_reset_articles(args: argparse.Namespace) -> int:
+    """Заменить справочник целиком: старые убрать, новые загрузить."""
+    path = Path(args.path) if args.path else BUNDLED_CATALOG
+    if not path.exists():
+        print(f"Файл не найден: {path}", file=sys.stderr)
+        return 1
+    init_db()
+    with SessionLocal() as session:
+        removed, disabled = _drop_articles(session)
+    print(f"Удалено старых артикулов: {removed}")
+    if disabled:
+        print(f"Отключено (на них есть зеркала, история сохранена): {disabled}")
+    with SessionLocal() as session:
+        report = import_articles(session, path)
+    print(f"Загружено из {path.name}: {report.added}")
+    return 0
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     """Подготовить всё к первому запуску. Повторный вызов безопасен.
 
@@ -235,12 +278,25 @@ def cmd_setup(args: argparse.Namespace) -> int:
         articles = session.scalar(select(func.count()).select_from(Article)) or 0
         employees = session.scalar(select(func.count()).select_from(Employee)) or 0
 
-    if articles:
-        print(f"Справочник артикулов уже загружен: {articles} шт.")
-    elif BUNDLED_CATALOG.exists():
+    if BUNDLED_CATALOG.exists():
+        # Импорт не создаёт дублей, поэтому вызываем его всегда:
+        # в базе от прежней версии могла остаться лишь горстка
+        # демонстрационных артикулов.
         with SessionLocal() as session:
             report = import_articles(session, BUNDLED_CATALOG)
-        print(f"Загружен справочник артикулов: {report.added} шт.")
+        if report.added:
+            print(f"Добавлено артикулов: {report.added}")
+        else:
+            print(f"Справочник артикулов уже загружен: {articles} шт.")
+        with SessionLocal() as session:
+            demo = session.scalars(
+                select(Article).where(Article.source_sheet == "demo")
+            ).all()
+            if demo and report.added:
+                for article in demo:
+                    article.is_active = False
+                session.commit()
+                print(f"Демонстрационные артикулы отключены: {len(demo)}")
     else:
         print("Справочник не найден, пропускаю. Загрузите его в админ-панели.")
 
@@ -330,6 +386,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     workers.add_argument("--pin", help="общий PIN для обоих; иначе у каждого свой случайный")
     workers.set_defaults(func=cmd_seed_test_workers)
+
+    reset = subparsers.add_parser(
+        "reset-articles", help="заменить справочник целиком"
+    )
+    reset.add_argument(
+        "path",
+        nargs="?",
+        help="файл справочника; по умолчанию docs/spravochnik-artikulov.xlsx",
+    )
+    reset.set_defaults(func=cmd_reset_articles)
 
     setup = subparsers.add_parser(
         "setup", help="подготовить всё к первому запуску (можно повторять)"

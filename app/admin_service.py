@@ -138,6 +138,93 @@ def add_article(
     return article
 
 
+@dataclass
+class BulkResult:
+    added: list[str]
+    restored: list[str]
+    already: list[str]
+
+    @property
+    def summary(self) -> str:
+        parts = [f"добавлено {len(self.added)}"]
+        if self.restored:
+            parts.append(f"включено обратно {len(self.restored)}")
+        if self.already:
+            parts.append(f"уже было {len(self.already)}")
+        return ", ".join(parts)
+
+
+def add_articles_bulk(
+    session: Session,
+    *,
+    text: str,
+    sheet: str = "",
+    section: str = "",
+) -> BulkResult:
+    """Добавить сразу список артикулов — по одному в строке.
+
+    Строку можно записать и с разделом через точку с запятой:
+    «Ambient 110 круг; БЕЗРАМНЫЕ КРУГЛЫЕ».
+    """
+    result = BulkResult([], [], [])
+    default_sheet = (sheet or "").strip() or "Добавлено вручную"
+    default_section = (section or "").strip()
+
+    known = {
+        article.code_key: article
+        for article in session.scalars(select(Article)).all()
+    }
+    last_order = {
+        row_sheet: value
+        for row_sheet, value in session.execute(
+            select(Article.source_sheet, func.max(Article.sort_order)).group_by(
+                Article.source_sheet
+            )
+        ).all()
+    }
+
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = [normalize_code(piece) for piece in line.split(";")]
+        code = parts[0]
+        if not code:
+            continue
+        row_section = parts[1] if len(parts) > 1 and parts[1] else default_section
+        row_sheet = parts[2] if len(parts) > 2 and parts[2] else default_sheet
+
+        key = match_key(code)
+        article = known.get(key)
+        if article is not None:
+            if not article.is_active:
+                article.is_active = True
+                result.restored.append(article.code)
+            else:
+                result.already.append(article.code)
+            continue
+
+        position = (last_order.get(row_sheet) or 0) + 1
+        last_order[row_sheet] = position
+        article = Article(
+            code=code,
+            code_key=key,
+            group_letters=group_letters(code),
+            source_sheet=row_sheet,
+            section=row_section or row_sheet,
+            sort_order=position,
+        )
+        session.add(article)
+        known[key] = article
+        result.added.append(code)
+
+    if not (result.added or result.restored or result.already):
+        raise ServiceError("Список пуст — вставьте артикулы, по одному в строке.")
+
+    session.commit()
+    return result
+
+
 def toggle_article(session: Session, article_id: int) -> Article:
     article = session.get(Article, article_id)
     if article is None:

@@ -34,6 +34,34 @@
 </div>
 
 <div class="card">
+  <h2 style="margin-top:0">Добавить списком</h2>
+  <form method="post" action="/admin/articles/add-many">
+    <label for="codes">Артикулы, по одному в строке</label>
+    <textarea id="codes" name="codes" rows="8" required
+              style="width:100%;font-size:16px;padding:10px;border-radius:12px;
+                     border:2px solid var(--line);background:var(--card);
+                     color:var(--ink);font-family:inherit"
+              placeholder="Zerkalo_60x80&#10;Alum rama 100x40 black&#10;Ambient 110 круг"></textarea>
+    <div class="grid-2" style="margin-top:10px">
+      <div>
+        <label for="bulk_sheet">Лист справочника</label>
+        <input id="bulk_sheet" name="sheet" type="text" list="sheets" autocomplete="off"
+               placeholder="Полотна">
+      </div>
+      <div>
+        <label for="bulk_section">Раздел в остатках</label>
+        <input id="bulk_section" name="section" type="text" autocomplete="off"
+               placeholder="ПОЛОТНА">
+      </div>
+    </div>
+    <button class="btn" type="submit" style="margin-top:12px">Добавить все</button>
+    <p class="hint">Уже заведённые артикулы пропускаются, отключённые
+      включаются обратно. Раздел можно задать прямо в строке через точку
+      с запятой: <span class="mono">Ambient 110 круг; БЕЗРАМНЫЕ КРУГЛЫЕ</span></p>
+  </form>
+</div>
+
+<div class="card">
   <h2 style="margin-top:0">Загрузить из файла</h2>
   <form method="post" action="/admin/articles/import" enctype="multipart/form-data">
     <input type="file" name="upload" accept=".xlsx,.xlsm,.csv,.txt" required

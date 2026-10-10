@@ -625,6 +625,22 @@ def admin_article_add(
     return redirect("/admin/articles")
 
 
+@app.post("/admin/articles/add-many")
+def admin_articles_add_many(
+    request: Request,
+    codes: str = Form(...),
+    sheet: str = Form(""),
+    section: str = Form(""),
+    who=Depends(admin_only),
+):
+    employee, site, session = who
+    result = admin_service.add_articles_bulk(
+        session, text=codes, sheet=sheet, section=section
+    )
+    flash(request, f"Артикулы списком: {result.summary}.")
+    return redirect("/admin/articles")
+
+
 @app.post("/admin/articles/{article_id}/toggle")
 def admin_article_toggle(request: Request, article_id: int, who=Depends(admin_only)):
     employee, site, session = who

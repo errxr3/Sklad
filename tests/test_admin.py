@@ -281,3 +281,70 @@ def test_переключатель_не_уводит_на_чужой_сайт(l
         "/theme", data={"back": "//evil.example.com/"}, follow_redirects=False
     )
     assert answer.headers["location"] == "/"
+
+
+# --- Добавление артикулов списком ---------------------------------------
+
+
+def test_админ_добавляет_артикулы_списком(as_admin, db):
+    answer = as_admin.post(
+        "/admin/articles/add-many",
+        data={
+            "codes": "Zerkalo_60x80\nAlum rama 100x40 black\n\nAmbient 110 круг\n",
+            "sheet": "Полотна",
+            "section": "ПОЛОТНА",
+        },
+        follow_redirects=True,
+    )
+    assert "добавлено 3" in answer.text
+    codes = {c for (c,) in db.query(Article.code).all()}
+    assert codes == {"Zerkalo_60x80", "Alum rama 100x40 black", "Ambient 110 круг"}
+    # Буквы номера определились по названию.
+    letters = {code: g for code, g in db.query(Article.code, Article.group_letters).all()}
+    assert letters["Zerkalo_60x80"] == "Z"
+    assert letters["Alum rama 100x40 black"] == "A"
+    assert letters["Ambient 110 круг"] == "AT"
+
+
+def test_раздел_можно_задать_в_строке(as_admin, db):
+    as_admin.post(
+        "/admin/articles/add-many",
+        data={"codes": "Ambient 110 круг; БЕЗРАМНЫЕ КРУГЛЫЕ; Безрамные", "sheet": "", "section": ""},
+    )
+    article = db.query(Article).filter_by(code="Ambient 110 круг").one()
+    assert article.section == "БЕЗРАМНЫЕ КРУГЛЫЕ"
+    assert article.source_sheet == "Безрамные"
+
+
+def test_списком_не_плодятся_дубли(as_admin, db):
+    make_article(db, "Zerkalo 600x800")
+    answer = as_admin.post(
+        "/admin/articles/add-many",
+        data={"codes": "ZERKALO 600х800\nAlum 500", "sheet": "", "section": ""},
+        follow_redirects=True,
+    )
+    assert "уже было 1" in answer.text
+    assert db.query(Article).count() == 2
+
+
+def test_списком_включаются_отключённые(as_admin, db, article):
+    as_admin.post(f"/admin/articles/{article.id}/toggle")
+    db.refresh(article)
+    assert article.is_active is False
+
+    answer = as_admin.post(
+        "/admin/articles/add-many",
+        data={"codes": article.code, "sheet": "", "section": ""},
+        follow_redirects=True,
+    )
+    assert "включено обратно 1" in answer.text
+    db.refresh(article)
+    assert article.is_active is True
+
+
+def test_пустой_список_отклоняется(as_admin, db):
+    answer = as_admin.post(
+        "/admin/articles/add-many", data={"codes": "   \n\n", "sheet": "", "section": ""}
+    )
+    assert answer.status_code == 400
+    assert "Список пуст" in answer.text
