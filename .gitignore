@@ -24,5 +24,7 @@ __pycache__/
 # --- Выгрузки и временные файлы ---
 *.pdf
 !docs/*.pdf
+*.xlsx
+!docs/*.xlsx
 *.log
 .DS_Store
