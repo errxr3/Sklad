@@ -163,3 +163,58 @@ def test_здоровье_сервиса(client):
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_cookie_не_разрастается_от_сканов(logged_in, article):
+    """Раньше список сканов лежал в cookie-сессии и за десяток зеркал
+    перерастал предел 4096 байт. Браузер отбрасывал такую cookie целиком,
+    и сборщика выбрасывало из системы прямо посреди смены."""
+    logged_in.post("/make", data={"article_id": article.id, "qty": "20"})
+
+    for index in range(1, 21):
+        logged_in.post("/receive", data={"code": f"Z{index:07d}"})
+        logged_in.post("/receive", data={"code": f"Z{index:07d}"})  # повтор, длинный отказ
+        logged_in.post("/receive", data={"code": "абракадабра"})    # ещё один отказ
+
+    cookie = logged_in.cookies.get("session")
+    assert cookie is not None, "сессия потерялась"
+    assert len(cookie) < 1500, f"cookie разрослась до {len(cookie)} байт"
+
+    # Вход сохранился, и сообщения по-прежнему доходят.
+    assert logged_in.get("/", follow_redirects=False).status_code == 200
+    answer = logged_in.post("/receive", data={"code": "Z0000001"})
+    assert "msg err" in answer.text
+
+
+def test_список_сканов_показывает_последние_восемь(logged_in, article):
+    logged_in.post("/make", data={"article_id": article.id, "qty": "12"})
+    for index in range(1, 13):
+        logged_in.post("/receive", data={"code": f"Z{index:07d}"})
+
+    page = logged_in.get("/receive")
+    assert page.text.count('<li class=') == 8
+    assert "Z0000012" in page.text
+    assert "Z0000001<" not in page.text  # самые старые вытеснены
+
+
+def test_список_сканов_очищается_при_смене_сотрудника(logged_in, db, article, second_worker):
+    logged_in.post("/make", data={"article_id": article.id, "qty": "1"})
+    logged_in.post("/receive", data={"code": "Z0000001"})
+    assert "Z0000001" in logged_in.get("/receive").text
+
+    logged_in.post("/logout")
+    site = db.query(Site).order_by(Site.sort_order).first()
+    logged_in.post(
+        "/login",
+        data={"employee_id": second_worker.id, "pin": TEST_PIN, "site_id": site.id},
+    )
+    assert "Z0000001" not in logged_in.get("/receive").text
+
+
+def test_на_экране_скана_виден_результат_последнего_зеркала(logged_in, article):
+    """Сообщение от печати не должно висеть поверх результата скана."""
+    logged_in.post("/make", data={"article_id": article.id, "qty": "1"})
+    answer = logged_in.post("/receive", data={"code": "Z0000001"})
+    assert answer.text.count('class="msg') == 1
+    assert "Выдано номеров" not in answer.text
+    assert "принято на склад" in answer.text

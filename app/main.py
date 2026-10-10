@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import secrets
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -18,14 +19,12 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 
-from . import __version__, config, labels, services, statuses
+from . import __version__, config, labels, scanlog, services, statuses
 from .articles import format_number
 from .db import get_session, init_db
 from .models import Article, Employee, Site
 from .numbering import current_value
 from .timeutil import fmt, now_utc, to_local
-
-SCAN_LOG_SIZE = 8
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -69,9 +68,29 @@ templates.env.globals["status_title"] = statuses.title
 # --- Вспомогательное --------------------------------------------------------
 
 
-def flash(request: Request, text: str, ok: bool = True) -> None:
-    """Сообщение, которое покажется на следующей странице."""
-    request.session.setdefault("flash", []).append({"text": text, "ok": ok})
+# В cookie-сессии держим только самое необходимое: её предел 4096 байт,
+# а переполненную cookie браузер отбрасывает целиком вместе со входом.
+MAX_FLASH = 3
+
+
+def flash(request: Request, text: str, ok: bool = True, only: bool = False) -> None:
+    """Сообщение, которое покажется на следующей странице.
+
+    only=True убирает накопленные сообщения: на экране скана сборщик
+    должен видеть результат последнего зеркала, а не прошлого шага.
+    """
+    messages = [] if only else request.session.get("flash", [])
+    messages.append({"text": text, "ok": ok})
+    request.session["flash"] = messages[-MAX_FLASH:]
+
+
+def session_id(request: Request) -> str:
+    """Идентификатор рабочего места — по нему храним список сканов."""
+    value = request.session.get("sid")
+    if not value:
+        value = uuid.uuid4().hex
+        request.session["sid"] = value
+    return value
 
 
 def _take_flashes(request: Request) -> list[dict]:
@@ -120,19 +139,18 @@ def _service_error(request: Request, exc: services.ServiceError) -> HTMLResponse
     )
 
 
-def _push_scan(request: Request, key: str, result: services.ScanResult) -> None:
+def _push_scan(request: Request, screen: str, result: services.ScanResult) -> None:
     """Запомнить скан, чтобы показать последние на экране."""
-    log = request.session.get(key, [])
-    log.insert(
-        0,
-        {
-            "ok": result.ok,
-            "number": result.number,
-            "text": result.message,
-            "time": to_local(now_utc()).strftime("%H:%M:%S"),
-        },
+    scanlog.add(
+        session_id(request),
+        screen,
+        scanlog.ScanLine(
+            ok=result.ok,
+            number=result.number,
+            text=result.message,
+            time=to_local(now_utc()).strftime("%H:%M:%S"),
+        ),
     )
-    request.session[key] = log[:SCAN_LOG_SIZE]
 
 
 # --- Вход и выход -----------------------------------------------------------
@@ -177,13 +195,14 @@ def login(
     request.session["site_id"] = site.id
     request.session["last_employee_id"] = employee.id
     request.session["last_site_id"] = site.id
-    request.session.pop("receive_log", None)
-    request.session.pop("ship_log", None)
+    scanlog.clear(session_id(request))
+    request.session["sid"] = uuid.uuid4().hex
     return redirect("/")
 
 
 @app.post("/logout")
 def logout(request: Request):
+    scanlog.clear(request.session.get("sid", ""))
     last_employee = request.session.get("last_employee_id")
     last_site = request.session.get("last_site_id")
     request.session.clear()
@@ -292,7 +311,7 @@ def batch_labels(request: Request, batch_id: int, who=Depends(current)):
 @app.get("/receive", response_class=HTMLResponse)
 def receive_form(request: Request, who=Depends(current)):
     employee, site, session = who
-    log = request.session.get("receive_log", [])
+    log = scanlog.get(session_id(request), "receive")
     return render(
         request,
         "scan.html",
@@ -300,7 +319,7 @@ def receive_form(request: Request, who=Depends(current)):
         prompt="Отсканируйте этикетку",
         action="/receive",
         log=log,
-        done_count=sum(1 for row in log if row["ok"]),
+        done_count=sum(1 for row in log if row.ok),
         done_word="принято",
         waiting=services.waiting_for_receive(session, site),
     )
@@ -310,15 +329,15 @@ def receive_form(request: Request, who=Depends(current)):
 def receive_scan(request: Request, code: str = Form(""), who=Depends(current)):
     employee, site, session = who
     result = services.scan_receive(session, code, employee, site)
-    _push_scan(request, "receive_log", result)
-    flash(request, result.message, ok=result.ok)
+    _push_scan(request, "receive", result)
+    flash(request, result.message, ok=result.ok, only=True)
     return redirect("/receive")
 
 
 @app.get("/ship", response_class=HTMLResponse)
 def ship_form(request: Request, who=Depends(current)):
     employee, site, session = who
-    log = request.session.get("ship_log", [])
+    log = scanlog.get(session_id(request), "ship")
     return render(
         request,
         "scan.html",
@@ -326,7 +345,7 @@ def ship_form(request: Request, who=Depends(current)):
         prompt="Отсканируйте этикетку",
         action="/ship",
         log=log,
-        done_count=sum(1 for row in log if row["ok"]),
+        done_count=sum(1 for row in log if row.ok),
         done_word="отгружено",
         waiting=None,
     )
@@ -336,8 +355,8 @@ def ship_form(request: Request, who=Depends(current)):
 def ship_scan(request: Request, code: str = Form(""), who=Depends(current)):
     employee, site, session = who
     result = services.scan_ship(session, code, employee, site)
-    _push_scan(request, "ship_log", result)
-    flash(request, result.message, ok=result.ok)
+    _push_scan(request, "ship", result)
+    flash(request, result.message, ok=result.ok, only=True)
     return redirect("/ship")
 
 
