@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }}{% endblock %}
+{% block content %}
+<h1>{{ heading }}</h1>
+
+<form method="post" action="{{ action }}" class="card" id="scanform">
+  <label for="code">{{ prompt }}</label>
+  <input id="code" name="code" class="scan-input" type="text"
+         autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+         enterkeyhint="done" autofocus placeholder="Z0000000">
+  <p class="hint">Сканер сам нажмёт Enter. Номер можно ввести и руками.</p>
+  <button class="btn" type="submit" style="margin-top:10px">Подтвердить</button>
+</form>
+
+<p class="counter">
+  За сегодняшний заход: <b>{{ done_count }}</b> {{ done_word }}{% if waiting is not none %} ·
+  ждут приёмки: <b>{{ waiting }}</b>{% endif %}
+</p>
+
+{% if log %}
+  <h2>Последние сканы</h2>
+  <ul class="log">
+    {% for row in log %}
+      <li class="{{ 'ok' if row.ok else 'err' }}">
+        <span class="time">{{ row.time }}</span>
+        <span class="num">{{ row.number or '—' }}</span><br>{{ row.text }}
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}
+
+<a class="btn secondary" href="/" style="margin-top:14px">На главную</a>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Единственная задача скрипта — держать курсор в поле скана,
+  // чтобы сборщику не приходилось тыкать в него после каждого зеркала.
+  (function () {
+    var field = document.getElementById('code');
+    if (!field) return;
+    var focus = function () { field.focus(); field.select(); };
+    focus();
+    window.addEventListener('pageshow', focus);
+    document.addEventListener('click', function (event) {
+      if (event.target.closest('a, button, input, select')) return;
+      focus();
+    });
+  })();
+</script>
+{% endblock %}

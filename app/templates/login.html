@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Вход — склад зеркал{% endblock %}
+{% block content %}
+<h1>Склад зеркал</h1>
+
+{% if not employees %}
+  <div class="card">
+    <p>Сотрудники ещё не заведены.</p>
+    <p class="hint">Заведите их командой:<br>
+      <span class="mono">python -m app.cli add-employee --name "Фамилия Имя"</span></p>
+  </div>
+{% else %}
+<form method="post" action="/login" class="card">
+  <label for="employee_id">Кто работает</label>
+  <select id="employee_id" name="employee_id" required>
+    <option value="">— выберите себя —</option>
+    {% for item in employees %}
+      <option value="{{ item.id }}" {% if item.id == last_employee_id %}selected{% endif %}>{{ item.name }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="pin">PIN-код</label>
+  <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*"
+         autocomplete="off" required>
+
+  <label for="site_id">Площадка</label>
+  <select id="site_id" name="site_id" required>
+    {% for item in sites %}
+      <option value="{{ item.id }}" {% if item.id == last_site_id %}selected{% endif %}>{{ item.name }}</option>
+    {% endfor %}
+  </select>
+
+  <button class="btn big" type="submit" style="margin-top:18px">Войти</button>
+</form>
+{% endif %}
+
+<p class="footnote">Версия {{ version }}</p>
+{% endblock %}

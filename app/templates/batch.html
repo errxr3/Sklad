@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Этикетки готовы{% endblock %}
+{% block content %}
+<h1>Этикетки готовы</h1>
+
+<div class="card">
+  <p style="font-size:21px;font-weight:700;margin:0 0 6px">{{ batch.article.code }}</p>
+  <p class="hint" style="margin:0">
+    {{ batch.qty }} шт · {{ batch.site.name }} · сборщик {{ batch.employee.name }}<br>
+    {{ fmt(batch.created_at) }}
+  </p>
+</div>
+
+<a class="btn big" href="/batch/{{ batch.id }}/labels.pdf" target="_blank" rel="noopener">
+  Открыть PDF и печатать
+</a>
+<a class="btn" href="/receive">Перейти к приёмке сканом</a>
+<a class="btn secondary" href="/make">Сделать ещё</a>
+
+<h2>Номера в партии</h2>
+<div class="card">
+  <p class="numbers">
+    {% for mirror in mirrors %}{{ mirror.number }}{% if not loop.last %} · {% endif %}{% endfor %}
+  </p>
+</div>
+
+<p class="hint">Если печать сорвалась — откройте PDF ещё раз по той же ссылке,
+номера не изменятся. Новые номера выдаются только при новой печати.</p>
+{% endblock %}

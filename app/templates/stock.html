@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Остатки{% endblock %}
+{% block content %}
+<h1>Остатки</h1>
+
+<form method="get" action="/stock" class="card">
+  <input name="q" type="search" value="{{ query }}" placeholder="Поиск по артикулу" autocomplete="off">
+  <button class="btn" type="submit" style="margin-top:10px">Показать</button>
+</form>
+
+<p class="counter">Считаются зеркала в статусе «На складе». Всего: <b>{{ grand }}</b> шт.</p>
+
+<div class="table-wrap card" style="padding:0">
+  <table>
+    <thead>
+      <tr>
+        <th>Артикул</th>
+        {% for s in sites %}<th class="num">{{ s.name }}</th>{% endfor %}
+        <th class="num">Итого</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          <td>{{ row.article }}</td>
+          {% for s in sites %}<td class="num">{{ row.by_site.get(s.id, 0) or '—' }}</td>{% endfor %}
+          <td class="num"><b>{{ row.total }}</b></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="{{ sites|length + 2 }}" class="empty">
+          {% if query %}По запросу «{{ query }}» остатков нет.{% else %}На складе пока пусто.{% endif %}
+        </td></tr>
+      {% endfor %}
+      {% if rows %}
+        <tr class="total">
+          <td>Итого</td>
+          {% for s in sites %}<td class="num">{{ totals.get(s.id, 0) }}</td>{% endfor %}
+          <td class="num">{{ grand }}</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<a class="btn secondary" href="/">На главную</a>
+{% endblock %}

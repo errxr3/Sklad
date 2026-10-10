@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Сделал зеркало{% endblock %}
+{% block content %}
+<h1>Сделал зеркало</h1>
+
+{% if not article %}
+  <form method="get" action="/make" class="card">
+    <label for="q">Артикул</label>
+    <input id="q" name="q" type="search" value="{{ query }}" autofocus
+           placeholder="Часть названия, например 600x800" autocomplete="off">
+    <p class="hint">Русская «х» и латинская «x» ищутся одинаково.</p>
+    <button class="btn" type="submit" style="margin-top:10px">Найти</button>
+  </form>
+
+  <div class="card" style="padding:0">
+    {% for item in articles %}
+      <a class="article-pick" href="/make?article_id={{ item.id }}">
+        {{ item.code }} <span class="pill g">{{ item.group_letters }}</span>
+      </a>
+    {% else %}
+      <p class="empty">
+        {% if query %}По запросу «{{ query }}» ничего не найдено.{% else %}Справочник пуст.{% endif %}
+      </p>
+    {% endfor %}
+  </div>
+  {% if truncated %}
+    <p class="hint">Показаны первые {{ articles|length }}. Уточните запрос.</p>
+  {% endif %}
+
+{% else %}
+  <div class="card">
+    <p class="hint" style="margin:0">Выбран артикул</p>
+    <p style="font-size:22px;font-weight:700;margin:4px 0">{{ article.code }}</p>
+    <p class="hint" style="margin:0">Буквы номера: <b>{{ article.group_letters }}</b> ·
+      следующий номер {{ next_number }}</p>
+    <a class="btn secondary" href="/make" style="margin-top:12px">Выбрать другой артикул</a>
+  </div>
+
+  <form method="post" action="/make" class="card">
+    <input type="hidden" name="article_id" value="{{ article.id }}">
+    <label>Сколько зеркал сделали</label>
+    <div class="btn-row">
+      {% for n in [1, 2, 3, 5, 10] %}
+        <button class="btn" type="submit" name="qty" value="{{ n }}">{{ n }}</button>
+      {% endfor %}
+    </div>
+    <label for="qty_custom" style="margin-top:18px">Другое количество</label>
+    <input id="qty_custom" name="qty" type="number" min="1" max="{{ max_qty }}"
+           inputmode="numeric" placeholder="например, 24">
+    <button class="btn" type="submit" style="margin-top:10px">Напечатать этикетки</button>
+    <p class="hint">Зеркала получат номера и статус «Напечатано».
+      Сборщиком будет записан {{ employee.name }} — навсегда.</p>
+  </form>
+{% endif %}
+{% endblock %}

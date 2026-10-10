@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Зеркало {{ mirror.number }}{% endblock %}
+{% block content %}
+<h1 class="mono">{{ mirror.number }}</h1>
+
+<div class="card">
+  <p style="font-size:21px;font-weight:700;margin:0 0 8px">{{ mirror.article.code }}</p>
+  <p style="margin:0 0 8px"><span class="pill {{ mirror.status }}">{{ mirror.status_title }}</span></p>
+  <p class="hint" style="margin:0">
+    Площадка: {{ mirror.site.name }}<br>
+    Сборщик: {{ mirror.assembler.name }}<br>
+    Этикетка напечатана: {{ fmt(mirror.created_at) }}
+  </p>
+</div>
+
+<h2>История</h2>
+<div class="table-wrap card" style="padding:0">
+  <table>
+    <thead><tr><th>Когда</th><th>Статус</th><th>Кто</th><th>Что было</th></tr></thead>
+    <tbody>
+      {% for item in movements %}
+        <tr>
+          <td>{{ fmt(item.created_at) }}</td>
+          <td>{{ item.from_title }} → <span class="pill {{ item.to_status }}">{{ item.to_title }}</span></td>
+          <td>{{ item.employee.name }}</td>
+          <td class="hint">{{ item.note or '—' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if mirror.batch_id %}
+  <a class="btn secondary" href="/batch/{{ mirror.batch_id }}/labels.pdf" target="_blank" rel="noopener">
+    Перепечатать этикетки партии
+  </a>
+{% endif %}
+<a class="btn secondary" href="/journal">К журналу</a>
+{% endblock %}

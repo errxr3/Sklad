@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Журнал движений{% endblock %}
+{% block content %}
+<h1>Журнал движений</h1>
+
+<form method="get" action="/journal" class="card">
+  <input name="number" type="search" value="{{ number }}" placeholder="Номер зеркала, например Z0000123"
+         autocomplete="off" autocapitalize="characters">
+  <button class="btn" type="submit" style="margin-top:10px">Найти</button>
+</form>
+
+<p class="counter">Записей: <b>{{ total }}</b>. Записи журнала не удаляются и не правятся.</p>
+
+<div class="table-wrap card" style="padding:0">
+  <table>
+    <thead>
+      <tr>
+        <th>Когда</th><th>Зеркало</th><th>Статус</th><th>Кто</th><th>Площадка</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+        <tr>
+          <td>{{ fmt(item.created_at) }}</td>
+          <td>
+            <a class="mono" href="/mirror/{{ item.mirror.number }}">{{ item.mirror.number }}</a><br>
+            <span class="hint">{{ item.mirror.article.code }}</span>
+          </td>
+          <td>{{ item.from_title }} → <span class="pill {{ item.to_status }}">{{ item.to_title }}</span></td>
+          <td>{{ item.employee.name }}</td>
+          <td>{{ item.site.name }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">Записей нет.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="pager">
+  {% if offset > 0 %}
+    <a class="btn secondary" href="/journal?number={{ number }}&offset={{ [offset - limit, 0] | max }}">Новее</a>
+  {% endif %}
+  {% if offset + limit < total %}
+    <a class="btn secondary" href="/journal?number={{ number }}&offset={{ offset + limit }}">Старее</a>
+  {% endif %}
+</div>
+
+<a class="btn secondary" href="/" style="margin-top:14px">На главную</a>
+{% endblock %}
