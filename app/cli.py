@@ -188,10 +188,12 @@ def cmd_seed_test_workers(args: argparse.Namespace) -> int:
     init_db()
     lines = ["PIN-коды тестовых сборщиков (файл в репозиторий не попадает)", ""]
     created: list[tuple[str, str]] = []
+    quiet = getattr(args, "quiet", False)
     with SessionLocal() as session:
         for name, role in TEST_WORKERS:
             if session.scalar(select(Employee).where(Employee.name == name)):
-                print(f"Сотрудник «{name}» уже есть, пропускаю.")
+                if not quiet:
+                    print(f"Сотрудник «{name}» уже есть, пропускаю.")
                 continue
             pin = args.pin or generate_pin()
             session.add(Employee(name=name, pin_hash=hash_pin(pin), role=role))
@@ -199,6 +201,10 @@ def cmd_seed_test_workers(args: argparse.Namespace) -> int:
         session.commit()
 
     if not created:
+        if quiet:
+            with SessionLocal() as session:
+                total = session.scalar(select(func.count()).select_from(Employee)) or 0
+            print(f"Сотрудники уже заведены: {total} чел.")
         return 0
 
     print("Заведены тестовые сборщики:")
@@ -238,11 +244,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
     else:
         print("Справочник не найден, пропускаю. Загрузите его в админ-панели.")
 
-    if employees:
-        print(f"Сотрудники уже заведены: {employees} чел.")
-    else:
-        args.pin = args.pin or "1234"
-        cmd_seed_test_workers(args)
+    # Заводим недостающих: часть сотрудников могла появиться в прежней
+    # версии, где ролей ещё не было.
+    args.pin = args.pin or "1234"
+    args.quiet = True
+    cmd_seed_test_workers(args)
 
     print()
     print("Всё готово. Запуск сайта:")
@@ -251,6 +257,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_stats(_args: argparse.Namespace) -> int:
+    from . import __version__
+
+    print(f"Версия:      {__version__}")
     with SessionLocal() as session:
         articles = session.scalar(select(func.count()).select_from(Article)) or 0
         employees = session.scalar(select(func.count()).select_from(Employee)) or 0
