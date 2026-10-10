@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from . import statuses
+from . import roles, statuses
 
 
 class Base(DeclarativeBase):
@@ -46,9 +46,16 @@ class Employee(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
     pin_hash: Mapped[str] = mapped_column(String(256))
-    role: Mapped[str] = mapped_column(String(32), default="assembler")
+    role: Mapped[str] = mapped_column(String(32), default=roles.ASSEMBLER)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    @property
+    def role_title(self) -> str:
+        return roles.title(self.role)
+
+    def can(self, permission: str) -> bool:
+        return roles.can(self.role, permission)
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Employee {self.name}>"
@@ -65,8 +72,14 @@ class Article(Base):
     # Ключ сравнения: без регистра, русская «х» заменена на латинскую.
     code_key: Mapped[str] = mapped_column(String(256), unique=True, index=True)
     group_letters: Mapped[str] = mapped_column(String(4))
-    # С какого листа файла загружен — для сверки со справочником.
+    # С какого листа файла загружен: «Полотна», «Алюминий», «Безрамные».
+    # Этот же лист служит разделом в таблице остатков.
     source_sheet: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Заголовок раздела над артикулом в исходной таблице: «ПОЛОТНА»,
+    # «БЕЗРАМНЫЕ КРУГЛЫЕ», «БЕЗРАМНЫЕ С ПОДОГРЕВОМ» и так далее.
+    section: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Порядок строк внутри листа — чтобы остатки шли как в исходной таблице.
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

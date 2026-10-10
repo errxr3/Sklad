@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import config
+from . import config, migrations
 from .models import Base, Site
 
 _is_sqlite = config.DATABASE_URL.startswith("sqlite")
@@ -52,6 +52,7 @@ def init_db() -> None:
     """Создать таблицы и завести площадки, если их ещё нет."""
     config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(engine)
+    migrations.apply(engine)
     with SessionLocal() as session:
         for code, name, order in DEFAULT_SITES:
             exists = session.scalar(select(Site).where(Site.code == code))

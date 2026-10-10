@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 
-from . import __version__, config, labels, scanlog, services, statuses
+from . import __version__, config, labels, roles, scanlog, services, statuses
 from .articles import format_number
 from .db import get_session, init_db
 from .models import Article, Employee, Site
@@ -63,6 +63,8 @@ templates = Jinja2Templates(directory=str(config.BASE_DIR / "app" / "templates")
 templates.env.globals["version"] = __version__
 templates.env.globals["fmt"] = fmt
 templates.env.globals["status_title"] = statuses.title
+templates.env.globals["role_title"] = roles.title
+templates.env.globals["perm"] = roles
 
 
 # --- Вспомогательное --------------------------------------------------------
@@ -113,6 +115,15 @@ class NeedLogin(Exception):
     """Сотрудник не вошёл — отправляем на страницу входа."""
 
 
+class NoAccess(Exception):
+    """У роли нет права на эту операцию."""
+
+    def __init__(self, employee, what: str) -> None:
+        super().__init__(what)
+        self.employee = employee
+        self.what = what
+
+
 def current(request: Request, session: Session = Depends(get_session)):
     """Текущий сотрудник и площадка из cookie-сессии."""
     employee_id = request.session.get("employee_id")
@@ -130,6 +141,34 @@ def current(request: Request, session: Session = Depends(get_session)):
 @app.exception_handler(NeedLogin)
 def _need_login(request: Request, _exc: NeedLogin) -> RedirectResponse:
     return redirect("/login")
+
+
+@app.exception_handler(NoAccess)
+def _no_access(request: Request, exc: NoAccess) -> HTMLResponse:
+    text = (
+        f"{exc.what} — это не ваша операция. "
+        f"Ваша роль: {roles.title(exc.employee.role)}. "
+        "Обратитесь к бригадиру или администратору."
+    )
+    return templates.TemplateResponse(
+        request,
+        "error.html",
+        {"error": text, "messages": [], "employee": exc.employee,
+         "site": getattr(request.state, "site", None), "theme": _theme(request)},
+        status_code=403,
+    )
+
+
+def require(permission: str, what: str):
+    """Зависимость маршрута: пускает только роли с нужным правом."""
+
+    def dependency(request: Request, who=Depends(current)):
+        employee, _site, _session = who
+        if not roles.can(employee.role, permission):
+            raise NoAccess(employee, what)
+        return who
+
+    return dependency
 
 
 @app.exception_handler(services.ServiceError)
@@ -235,7 +274,7 @@ def make_form(
     request: Request,
     q: str = Query(""),
     article_id: int | None = Query(None),
-    who=Depends(current),
+    who=Depends(require(roles.MAKE, "Печать этикеток")),
 ):
     employee, site, session = who
     article = None
@@ -264,7 +303,7 @@ def make_submit(
     article_id: int = Form(...),
     qty: str = Form(""),
     qty_custom: str = Form(""),
-    who=Depends(current),
+    who=Depends(require(roles.MAKE, "Печать этикеток")),
 ):
     """Количество приходит либо нажатой кнопкой-пресетом, либо из поля ввода.
 
@@ -287,7 +326,7 @@ def make_submit(
 
 
 @app.get("/batch/{batch_id}", response_class=HTMLResponse)
-def batch_view(request: Request, batch_id: int, who=Depends(current)):
+def batch_view(request: Request, batch_id: int, who=Depends(require(roles.MAKE, "Печать этикеток"))):
     employee, site, session = who
     batch = services.get_batch(session, batch_id)
     return render(
@@ -299,7 +338,7 @@ def batch_view(request: Request, batch_id: int, who=Depends(current)):
 
 
 @app.get("/batch/{batch_id}/labels.pdf")
-def batch_labels(request: Request, batch_id: int, who=Depends(current)):
+def batch_labels(request: Request, batch_id: int, who=Depends(require(roles.MAKE, "Печать этикеток"))):
     employee, site, session = who
     batch = services.get_batch(session, batch_id)
     mirrors = services.batch_mirrors(session, batch_id)
@@ -316,7 +355,7 @@ def batch_labels(request: Request, batch_id: int, who=Depends(current)):
 
 
 @app.get("/receive", response_class=HTMLResponse)
-def receive_form(request: Request, who=Depends(current)):
+def receive_form(request: Request, who=Depends(require(roles.RECEIVE, "Приёмка на склад"))):
     employee, site, session = who
     log = scanlog.get(session_id(request), "receive")
     return render(
@@ -333,7 +372,7 @@ def receive_form(request: Request, who=Depends(current)):
 
 
 @app.post("/receive")
-def receive_scan(request: Request, code: str = Form(""), who=Depends(current)):
+def receive_scan(request: Request, code: str = Form(""), who=Depends(require(roles.RECEIVE, "Приёмка на склад"))):
     employee, site, session = who
     result = services.scan_receive(session, code, employee, site)
     _push_scan(request, "receive", result)
@@ -342,7 +381,7 @@ def receive_scan(request: Request, code: str = Form(""), who=Depends(current)):
 
 
 @app.get("/ship", response_class=HTMLResponse)
-def ship_form(request: Request, who=Depends(current)):
+def ship_form(request: Request, who=Depends(require(roles.SHIP, "Отгрузка"))):
     employee, site, session = who
     log = scanlog.get(session_id(request), "ship")
     return render(
@@ -359,7 +398,7 @@ def ship_form(request: Request, who=Depends(current)):
 
 
 @app.post("/ship")
-def ship_scan(request: Request, code: str = Form(""), who=Depends(current)):
+def ship_scan(request: Request, code: str = Form(""), who=Depends(require(roles.SHIP, "Отгрузка"))):
     employee, site, session = who
     result = services.scan_ship(session, code, employee, site)
     _push_scan(request, "ship", result)
