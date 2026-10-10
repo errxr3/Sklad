@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, Form, Query, Request
@@ -26,7 +27,20 @@ from .timeutil import fmt, now_utc, to_local
 
 SCAN_LOG_SIZE = 8
 
-app = FastAPI(title="Склад зеркал", version=__version__, docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """При запуске создаём таблицы и площадки, если их ещё нет."""
+    init_db()
+    yield
+
+
+app = FastAPI(
+    title="Склад зеркал",
+    version=__version__,
+    docs_url=None,
+    redoc_url=None,
+    lifespan=lifespan,
+)
 
 _secret = config.SECRET_KEY
 if not _secret:
@@ -50,11 +64,6 @@ templates = Jinja2Templates(directory=str(config.BASE_DIR / "app" / "templates")
 templates.env.globals["version"] = __version__
 templates.env.globals["fmt"] = fmt
 templates.env.globals["status_title"] = statuses.title
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    init_db()
 
 
 # --- Вспомогательное --------------------------------------------------------
