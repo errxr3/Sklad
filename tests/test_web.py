@@ -218,3 +218,24 @@ def test_на_экране_скана_виден_результат_послед
     assert answer.text.count('class="msg') == 1
     assert "Выдано номеров" not in answer.text
     assert "принято на склад" in answer.text
+
+
+def test_кнопка_количества_работает_при_пустом_поле_ввода(logged_in, article):
+    """Браузер отправляет и нажатую кнопку, и пустое поле «другое количество».
+    Раньше у них было одно имя и до сервера доходила пустая строка."""
+    created = logged_in.post(
+        "/make",
+        data={"article_id": article.id, "qty": "3", "qty_custom": ""},
+        follow_redirects=True,
+    )
+    assert "Выдано номеров: 3" in created.text
+    assert "Z0000003" in created.text
+
+
+def test_своё_количество_из_поля_ввода(logged_in, article):
+    created = logged_in.post(
+        "/make",
+        data={"article_id": article.id, "qty": "", "qty_custom": "7"},
+        follow_redirects=True,
+    )
+    assert "Выдано номеров: 7" in created.text

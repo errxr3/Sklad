@@ -263,11 +263,18 @@ def make_submit(
     request: Request,
     article_id: int = Form(...),
     qty: str = Form(""),
+    qty_custom: str = Form(""),
     who=Depends(current),
 ):
+    """Количество приходит либо нажатой кнопкой-пресетом, либо из поля ввода.
+
+    У кнопок и у поля разные имена: иначе браузер отправляет оба значения
+    под одним именем и до обработчика доходит пустая строка из поля.
+    """
     employee, site, session = who
+    raw = (qty or "").strip() or (qty_custom or "").strip()
     try:
-        quantity = int((qty or "").strip())
+        quantity = int(raw)
     except ValueError:
         flash(request, "Укажите количество числом.", ok=False)
         return redirect(f"/make?article_id={article_id}")

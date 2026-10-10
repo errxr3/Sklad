@@ -90,8 +90,8 @@ a.btn {
 .btn.secondary { background: #fff; color: var(--ink); border: 2px solid var(--line); }
 .btn.ghost { background: transparent; color: var(--accent); border: 2px solid var(--accent); }
 .btn.big { min-height: 72px; font-size: 21px; }
-.btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.btn-row .btn { width: auto; flex: 1 1 70px; margin-bottom: 0; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-row .btn { width: auto; flex: 1 1 48px; padding: 12px 6px; margin-bottom: 0; }
 
 /* --- Формы --- */
 label { display: block; font-weight: 600; margin: 12px 0 6px; }
@@ -185,3 +185,17 @@ tr.total td { font-weight: 700; background: #eceff3; border-top: 2px solid var(-
 .pager { display: flex; gap: 10px; justify-content: space-between; margin-top: 12px; }
 .pager .btn { width: auto; flex: 1; margin: 0; }
 .footnote { color: var(--muted); font-size: 13px; margin-top: 20px; text-align: center; }
+
+/* На узком экране телефона таблица должна помещаться целиком:
+   уплотняем ячейки и не растягиваем заголовки капителью. */
+@media (max-width: 440px) {
+  table { font-size: 14px; }
+  th, td { padding: 8px 6px; }
+  th {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 12px;
+    line-height: 1.2;
+  }
+  h1 { font-size: 21px; }
+}
