@@ -4,6 +4,34 @@ setlocal
 cd /d "%~dp0"
 title Склад зеркал
 
+rem --- Если файл лежит не в папке проекта, ищем её сами ---
+if not exist "requirements.txt" (
+  if exist "%USERPROFILE%\Sklad\requirements.txt" (
+    cd /d "%USERPROFILE%\Sklad"
+  ) else if exist "%USERPROFILE%\Desktop\Sklad\requirements.txt" (
+    cd /d "%USERPROFILE%\Desktop\Sklad"
+  ) else if exist "%USERPROFILE%\Documents\Sklad\requirements.txt" (
+    cd /d "%USERPROFILE%\Documents\Sklad"
+  )
+)
+
+if not exist "requirements.txt" (
+  echo [ОШИБКА] Папка проекта не найдена.
+  echo.
+  echo Этот файл запущен из:
+  echo    %~dp0
+  echo а там нет файлов проекта.
+  echo.
+  echo Перенесите start.bat в папку Sklad - туда, где лежат
+  echo requirements.txt и папка app - и запустите оттуда.
+  echo.
+  pause
+  exit /b 1
+)
+
+echo Папка проекта: %CD%
+echo.
+
 echo ========================================
 echo   СКЛАД ЗЕРКАЛ - запуск
 echo ========================================
