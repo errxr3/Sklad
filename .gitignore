@@ -1,0 +1,28 @@
+# --- База данных (в репозиторий не добавляем) ---
+*.db
+*.sqlite
+*.sqlite3
+data/*
+!data/.gitkeep
+
+# --- Секреты: ключи, PIN-коды ---
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- Выгрузки и временные файлы ---
+*.pdf
+!docs/*.pdf
+*.log
+.DS_Store
