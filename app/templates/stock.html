@@ -5,42 +5,65 @@
 
 <form method="get" action="/stock" class="card">
   <input name="q" type="search" value="{{ query }}" placeholder="Поиск по артикулу" autocomplete="off">
-  <button class="btn" type="submit" style="margin-top:10px">Показать</button>
+  <div class="btn-row" style="margin-top:10px">
+    <button class="btn" type="submit">Показать</button>
+    {% if only_with_stock %}
+      <a class="btn secondary" href="/stock?q={{ query }}">Все артикулы</a>
+    {% else %}
+      <a class="btn secondary" href="/stock?q={{ query }}&amp;only=1">Только с остатком</a>
+    {% endif %}
+  </div>
 </form>
 
-<p class="counter">Считаются зеркала в статусе «На складе». Всего: <b>{{ grand }}</b> шт.</p>
+<p class="counter">
+  Считаются зеркала в статусе «На складе». Всего: <b>{{ grand }}</b> шт.
+  {% for s in sites %}· {{ s.name }}: <b>{{ totals.get(s.id, 0) }}</b> {% endfor %}
+</p>
 
-<div class="table-wrap card" style="padding:0">
-  <table>
-    <thead>
-      <tr>
-        <th>Артикул</th>
-        {% for s in sites %}<th class="num">{{ s.name }}</th>{% endfor %}
-        <th class="num">Итого</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in rows %}
+{% for section in sections %}
+  <h2 class="section-title">{{ section.title }}</h2>
+  <div class="table-wrap card" style="padding:0">
+    <table>
+      <thead>
         <tr>
-          <td>{{ row.article }}</td>
-          {% for s in sites %}<td class="num">{{ row.by_site.get(s.id, 0) or '—' }}</td>{% endfor %}
-          <td class="num"><b>{{ row.total }}</b></td>
+          <th>Артикул</th>
+          {% for s in sites %}<th class="num">{{ s.name }}</th>{% endfor %}
+          <th class="num">Остаток</th>
         </tr>
-      {% else %}
-        <tr><td colspan="{{ sites|length + 2 }}" class="empty">
-          {% if query %}По запросу «{{ query }}» остатков нет.{% else %}На складе пока пусто.{% endif %}
-        </td></tr>
-      {% endfor %}
-      {% if rows %}
+      </thead>
+      <tbody>
+        {% for row in section.rows %}
+          <tr{% if row.total == 0 %} class="zero"{% endif %}>
+            <td>{{ row.article }}</td>
+            {% for s in sites %}<td class="num">{{ row.by_site.get(s.id, 0) or '—' }}</td>{% endfor %}
+            <td class="num"><b>{{ row.total or '—' }}</b></td>
+          </tr>
+        {% endfor %}
         <tr class="total">
-          <td>Итого</td>
-          {% for s in sites %}<td class="num">{{ totals.get(s.id, 0) }}</td>{% endfor %}
-          <td class="num">{{ grand }}</td>
+          <td>Итого «{{ section.title }}»</td>
+          {% for s in sites %}<td class="num">{{ section.totals.get(s.id, 0) }}</td>{% endfor %}
+          <td class="num">{{ section.total }}</td>
         </tr>
-      {% endif %}
-    </tbody>
-  </table>
-</div>
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="card"><p class="empty">
+    {% if query %}По запросу «{{ query }}» ничего не найдено.{% else %}Справочник артикулов пуст.{% endif %}
+  </p></div>
+{% endfor %}
+
+{% if sections %}
+  <div class="card">
+    <table>
+      <tr class="total">
+        <td>Итого по всем разделам</td>
+        {% for s in sites %}<td class="num">{{ totals.get(s.id, 0) }}</td>{% endfor %}
+        <td class="num">{{ grand }}</td>
+      </tr>
+    </table>
+  </div>
+{% endif %}
 
 <a class="btn secondary" href="/">На главную</a>
 {% endblock %}

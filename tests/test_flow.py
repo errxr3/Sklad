@@ -198,6 +198,12 @@ def test_журнал_ищет_по_номеру(db, article, worker, site):
 # --- Остатки ----------------------------------------------------------------
 
 
+def _stock_rows(session, **kwargs) -> dict[str, object]:
+    """Все строки остатков по артикулам, без разбивки на разделы."""
+    _sites, sections, _totals, _grand = services.stock(session, **kwargs)
+    return {row.article: row for section in sections for row in section.rows}
+
+
 def test_остатки_считают_только_то_что_на_складе(db, article, worker, site):
     batch = services.create_print_batch(
         db, article_id=article.id, qty=5, employee=worker, site=site
@@ -205,19 +211,19 @@ def test_остатки_считают_только_то_что_на_склад�
     mirrors = services.batch_mirrors(db, batch.id)
 
     # Ничего не принято — остаток нулевой.
-    _, rows, _, grand = services.stock(db)
+    _, _, _, grand = services.stock(db)
     assert grand == 0
 
     for mirror in mirrors[:4]:
         services.scan_receive(db, mirror.number, worker, site)
-    _, rows, _, grand = services.stock(db)
+    _, _, _, grand = services.stock(db)
     assert grand == 4
 
     services.scan_ship(db, mirrors[0].number, worker, site)
-    _, rows, totals, grand = services.stock(db)
+    _, _, totals, grand = services.stock(db)
     assert grand == 3
-    assert rows[0].article == article.code
-    assert rows[0].by_site[site.id] == 3
+    rows = _stock_rows(db)
+    assert rows[article.code].by_site[site.id] == 3
 
 
 def test_остатки_разделяются_по_площадкам(db, article, worker, site, other_site):
@@ -228,7 +234,7 @@ def test_остатки_разделяются_по_площадкам(db, artic
         for mirror in services.batch_mirrors(db, batch.id):
             services.scan_receive(db, mirror.number, worker, current_site)
 
-    _, rows, totals, grand = services.stock(db)
+    _, _, totals, grand = services.stock(db)
     assert grand == 5
     assert totals[site.id] == 2
     assert totals[other_site.id] == 3
@@ -244,12 +250,59 @@ def test_остатки_по_разным_артикулам(db, worker, site):
         for mirror in services.batch_mirrors(db, batch.id):
             services.scan_receive(db, mirror.number, worker, site)
 
-    _, rows, _, grand = services.stock(db)
+    _, _, _, grand = services.stock(db)
     assert grand == 3
-    assert {row.article: row.total for row in rows} == {
-        "Zerkalo 600x800": 2,
-        "Alum 400x1200": 1,
-    }
+    rows = _stock_rows(db)
+    assert rows["Zerkalo 600x800"].total == 2
+    assert rows["Alum 400x1200"].total == 1
+
+
+def test_остатки_показывают_все_артикулы_а_фильтр_прячет_нулевые(db, worker, site):
+    """По умолчанию таблица повторяет справочник целиком, как в исходном
+    файле, а кнопка «только с остатком» оставляет лишь непустые строки."""
+    zerkalo = make_article(db, "Zerkalo 600x800")
+    make_article(db, "Alum 400x1200")
+    batch = services.create_print_batch(
+        db, article_id=zerkalo.id, qty=1, employee=worker, site=site
+    )
+    services.scan_receive(db, services.batch_mirrors(db, batch.id)[0].number, worker, site)
+
+    assert set(_stock_rows(db)) == {"Zerkalo 600x800", "Alum 400x1200"}
+    assert set(_stock_rows(db, only_with_stock=True)) == {"Zerkalo 600x800"}
+
+
+def test_остатки_разложены_по_разделам_справочника(db, worker, site):
+    """Разделы и порядок строк повторяют исходную таблицу."""
+    from app.models import Article
+
+    for position, (code, sheet, section) in enumerate(
+        [
+            ("Zerkalo_100x200", "Полотна", "ПОЛОТНА"),
+            ("Zerkalo_90x200", "Полотна", "ПОЛОТНА"),
+            ("Ambient 200x100 knopka", "Безрамные", "БЕЗРАМНЫЕ"),
+            ("Ambient krug 60", "Безрамные", "БЕЗРАМНЫЕ КРУГЛЫЕ"),
+        ],
+        start=1,
+    ):
+        db.add(
+            Article(
+                code=code,
+                code_key=code.casefold(),
+                group_letters="Z",
+                source_sheet=sheet,
+                section=section,
+                sort_order=position,
+            )
+        )
+    db.commit()
+
+    _sites, sections, _totals, _grand = services.stock(db)
+    assert [s.title for s in sections] == [
+        "ПОЛОТНА",
+        "БЕЗРАМНЫЕ",
+        "БЕЗРАМНЫЕ КРУГЛЫЕ",
+    ]
+    assert [r.article for r in sections[0].rows] == ["Zerkalo_100x200", "Zerkalo_90x200"]
 
 
 def test_ждут_приёмки(db, article, worker, site):

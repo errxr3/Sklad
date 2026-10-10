@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Сотрудники{% endblock %}
+{% block content %}
+<h1>Сотрудники</h1>
+{% include "admin/_nav.html" %}
+
+<div class="card">
+  <h2 style="margin-top:0">Завести сотрудника</h2>
+  <form method="post" action="/admin/employees/add">
+    <div class="grid-2">
+      <div>
+        <label for="name">Фамилия и имя</label>
+        <input id="name" name="name" type="text" required autocomplete="off">
+      </div>
+      <div>
+        <label for="pin">PIN-код</label>
+        <input id="pin" name="pin" type="text" inputmode="numeric" pattern="[0-9]*"
+               minlength="4" required autocomplete="off">
+      </div>
+    </div>
+    <label for="role">Роль</label>
+    <select id="role" name="role" required>
+      {% for r in roles_list %}<option value="{{ r }}">{{ role_title(r) }}</option>{% endfor %}
+    </select>
+    <button class="btn" type="submit" style="margin-top:12px">Завести</button>
+  </form>
+  <p class="hint">Сборщик печатает этикетки и принимает на склад. Грузчик отгружает.
+    Бригадир делает и то, и другое — принимает за сборщиком для проверки сборки.
+    Администратор видит и может всё.</p>
+</div>
+
+<div class="table-wrap card" style="padding:0">
+  <table>
+    <thead><tr><th>Сотрудник</th><th>Роль</th><th>Состояние</th><th>Действия</th></tr></thead>
+    <tbody>
+      {% for item in employees %}
+        <tr{% if not item.is_active %} class="zero"{% endif %}>
+          <td>{{ item.name }}</td>
+          <td>
+            <form method="post" action="/admin/employees/{{ item.id }}/role" class="inline-form">
+              <select name="role" onchange="this.form.submit()" style="min-height:40px;font-size:15px">
+                {% for r in roles_list %}
+                  <option value="{{ r }}" {% if r == item.role %}selected{% endif %}>{{ role_title(r) }}</option>
+                {% endfor %}
+              </select>
+              <noscript><button type="submit">Сменить</button></noscript>
+            </form>
+          </td>
+          <td>{{ 'активен' if item.is_active else 'отключён' }}</td>
+          <td>
+            <div class="row-actions">
+              <form method="post" action="/admin/employees/{{ item.id }}/pin" class="inline-form">
+                <input name="pin" type="text" inputmode="numeric" pattern="[0-9]*" minlength="4"
+                       placeholder="новый PIN" required
+                       style="width:120px;min-height:38px;font-size:14px;display:inline-block">
+                <button type="submit">Сменить PIN</button>
+              </form>
+              <form method="post" action="/admin/employees/{{ item.id }}/toggle" class="inline-form">
+                <button type="submit" {% if item.is_active %}class="danger"{% endif %}>
+                  {{ 'Отключить' if item.is_active else 'Включить' }}
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

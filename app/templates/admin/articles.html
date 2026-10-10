@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Артикулы{% endblock %}
+{% block content %}
+<h1>Артикулы</h1>
+{% include "admin/_nav.html" %}
+
+<div class="card">
+  <h2 style="margin-top:0">Добавить артикул</h2>
+  <form method="post" action="/admin/articles/add">
+    <label for="code">Артикул</label>
+    <input id="code" name="code" type="text" required autocomplete="off"
+           placeholder="например, Zerkalo_60x80">
+    <div class="grid-2">
+      <div>
+        <label for="sheet">Лист справочника</label>
+        <input id="sheet" name="sheet" type="text" list="sheets" autocomplete="off"
+               placeholder="Полотна">
+        <datalist id="sheets">
+          {% for s in sheets %}<option value="{{ s }}">{% endfor %}
+        </datalist>
+      </div>
+      <div>
+        <label for="section">Раздел в остатках</label>
+        <input id="section" name="section" type="text" autocomplete="off"
+               placeholder="ПОЛОТНА">
+      </div>
+    </div>
+    <button class="btn" type="submit" style="margin-top:12px">Добавить</button>
+    <p class="hint">Буквы номера определятся сами по названию: Zerkalo — Z,
+      Alum — A, Ambient — AT, остальное — X. Русская «х» приравнивается
+      к латинской «x». Если лист и раздел не указать, артикул попадёт
+      в «Добавлено вручную».</p>
+  </form>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Загрузить из файла</h2>
+  <form method="post" action="/admin/articles/import" enctype="multipart/form-data">
+    <input type="file" name="upload" accept=".xlsx,.xlsm,.csv,.txt" required
+           style="font-size:16px">
+    <button class="btn" type="submit" style="margin-top:12px">Загрузить</button>
+    <p class="hint">Файл .xlsx или .csv: артикулы в столбце A, читаются все листы.
+      Заголовки разделов и строки итогов пропускаются. Уже заведённые
+      артикулы не задваиваются.</p>
+  </form>
+</div>
+
+<form method="get" action="/admin/articles" class="card">
+  <input name="q" type="search" value="{{ query }}" placeholder="Поиск по артикулу" autocomplete="off">
+  <button class="btn" type="submit" style="margin-top:10px">Найти</button>
+</form>
+
+<p class="counter">Всего найдено: <b>{{ total }}</b></p>
+
+<div class="table-wrap card" style="padding:0">
+  <table>
+    <thead><tr><th>Артикул</th><th>Раздел</th><th>Буквы</th><th>Состояние</th><th></th></tr></thead>
+    <tbody>
+      {% for item in articles %}
+        <tr{% if not item.is_active %} class="zero"{% endif %}>
+          <td>{{ item.code }}</td>
+          <td class="hint">{{ item.section or item.source_sheet or '—' }}</td>
+          <td><span class="pill">{{ item.group_letters }}</span></td>
+          <td>{{ 'активен' if item.is_active else 'отключён' }}</td>
+          <td>
+            <form method="post" action="/admin/articles/{{ item.id }}/toggle" class="inline-form">
+              <div class="row-actions">
+                <button type="submit" {% if item.is_active %}class="danger"{% endif %}>
+                  {{ 'Отключить' if item.is_active else 'Включить' }}
+                </button>
+              </div>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">Ничего не найдено.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="pager">
+  {% if offset > 0 %}
+    <a class="btn secondary" href="/admin/articles?q={{ query }}&amp;offset={{ [offset - limit, 0] | max }}">Назад</a>
+  {% endif %}
+  {% if offset + limit < total %}
+    <a class="btn secondary" href="/admin/articles?q={{ query }}&amp;offset={{ offset + limit }}">Дальше</a>
+  {% endif %}
+</div>
+{% endblock %}

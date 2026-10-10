@@ -323,6 +323,15 @@ def waiting_for_receive(session: Session, site: Site) -> int:
     ) or 0
 
 
+def in_stock_count(session: Session, site: Site) -> int:
+    """Сколько зеркал лежит на складе этой площадки."""
+    return session.scalar(
+        select(func.count())
+        .select_from(Mirror)
+        .where(Mirror.status == statuses.IN_STOCK, Mirror.site_id == site.id)
+    ) or 0
+
+
 @dataclass
 class StockRow:
     article: str
@@ -330,35 +339,84 @@ class StockRow:
     total: int
 
 
-def stock(session: Session, query: str = "") -> tuple[list[Site], list[StockRow], dict[int, int], int]:
-    """Остатки: артикул × площадка. Считаются зеркала в статусе «На складе»."""
+@dataclass
+class StockSection:
+    """Раздел исходной таблицы: «ПОЛОТНА», «БЕЗРАМНЫЕ КРУГЛЫЕ» и так далее."""
+
+    title: str
+    sheet: str
+    rows: list[StockRow]
+    totals: dict[int, int]
+    total: int
+
+
+def stock(
+    session: Session,
+    query: str = "",
+    only_with_stock: bool = False,
+) -> tuple[list[Site], list[StockSection], dict[int, int], int]:
+    """Остатки артикул × площадка, разложенные по разделам справочника.
+
+    Порядок артикулов и разделов повторяет исходную таблицу.
+    Считаются зеркала в статусе «На складе».
+    """
     sites = active_sites(session)
 
-    stmt = (
-        select(Article.code, Mirror.site_id, func.count(Mirror.id))
-        .join(Article, Article.id == Mirror.article_id)
+    counts: dict[int, dict[int, int]] = {}
+    for article_id, site_id, count in session.execute(
+        select(Mirror.article_id, Mirror.site_id, func.count(Mirror.id))
         .where(Mirror.status == statuses.IN_STOCK)
-        .group_by(Article.code, Mirror.site_id)
-        .order_by(Article.code)
-    )
+        .group_by(Mirror.article_id, Mirror.site_id)
+    ).all():
+        counts.setdefault(article_id, {})[site_id] = count
+
+    stmt = select(Article).where(Article.is_active.is_(True))
     needle = match_key(query)
     if needle:
         stmt = stmt.where(Article.code_key.like(f"%{needle}%"))
+    # Разделы идут в том же порядке, что и в файле: сначала по листу,
+    # затем по положению строки внутри листа.
+    stmt = stmt.order_by(Article.id, Article.sort_order)
 
-    rows: dict[str, StockRow] = {}
-    for code, site_id, count in session.execute(stmt).all():
-        row = rows.setdefault(code, StockRow(code, {s.id: 0 for s in sites}, 0))
-        row.by_site[site_id] = count
-        row.total += count
-
-    totals = {s.id: 0 for s in sites}
+    sections: list[StockSection] = []
+    index: dict[tuple[str, str], StockSection] = {}
+    totals = {site.id: 0 for site in sites}
     grand = 0
-    for row in rows.values():
-        for site_id, count in row.by_site.items():
-            totals[site_id] = totals.get(site_id, 0) + count
-        grand += row.total
 
-    return sites, list(rows.values()), totals, grand
+    for article in session.scalars(stmt):
+        by_article = counts.get(article.id, {})
+        row_total = sum(by_article.values())
+        if only_with_stock and row_total == 0:
+            continue
+
+        sheet = article.source_sheet or "Без листа"
+        title = article.section or sheet
+        key = (sheet, title)
+        section = index.get(key)
+        if section is None:
+            section = StockSection(
+                title=title,
+                sheet=sheet,
+                rows=[],
+                totals={site.id: 0 for site in sites},
+                total=0,
+            )
+            index[key] = section
+            sections.append(section)
+
+        row = StockRow(
+            article=article.code,
+            by_site={site.id: by_article.get(site.id, 0) for site in sites},
+            total=row_total,
+        )
+        section.rows.append(row)
+        for site_id, count in row.by_site.items():
+            section.totals[site_id] += count
+            totals[site_id] += count
+        section.total += row_total
+        grand += row_total
+
+    return sites, sections, totals, grand
 
 
 def journal(

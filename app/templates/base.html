@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="{{ theme }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#15181d">
+  <meta name="theme-color" content="{{ '#0c0e12' if theme == 'dark' else '#15181d' }}">
   <title>{% block title %}Склад зеркал{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css?v={{ version }}">
 </head>
@@ -12,11 +12,20 @@
 <div class="topbar">
   <a href="/" class="who">
     <b>{{ employee.name }}</b>
-    <span class="site">{{ site.name }}</span>
+    <span class="site">{{ employee.role_title }} · {{ site.name }}</span>
   </a>
-  <form method="post" action="/logout" style="margin:0">
-    <button class="exit" type="submit">Выйти</button>
-  </form>
+  <div class="tools">
+    <form method="post" action="/theme" class="inline-form">
+      <input type="hidden" name="back" value="{{ path }}">
+      <button class="icon-btn" type="submit"
+              title="{{ 'Светлая тема' if theme == 'dark' else 'Тёмная тема' }}">
+        {{ 'Светлая' if theme == 'dark' else 'Тёмная' }}
+      </button>
+    </form>
+    <form method="post" action="/logout" class="inline-form">
+      <button class="exit" type="submit">Выйти</button>
+    </form>
+  </div>
 </div>
 {% endif %}
 

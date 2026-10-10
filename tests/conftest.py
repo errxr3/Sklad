@@ -14,7 +14,7 @@ os.environ["SKLAD_DB_PATH"] = str(_TMP_DIR / "test.db")
 os.environ["SKLAD_SECRET_KEY"] = "test-secret-key-not-for-production"
 os.environ["SKLAD_TZ_OFFSET_HOURS"] = "3"
 
-from app import security, statuses  # noqa: E402
+from app import roles, security, statuses  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.models import (  # noqa: E402
     Article,
@@ -78,6 +78,30 @@ def second_worker(db):
     db.add(employee)
     db.commit()
     return employee
+
+
+def make_employee(db, name: str, role: str) -> Employee:
+    employee = Employee(name=name, pin_hash=security.hash_pin(TEST_PIN), role=role)
+    db.add(employee)
+    db.commit()
+    return employee
+
+
+@pytest.fixture
+def loader(db):
+    """Грузчик: только отгрузка."""
+    return make_employee(db, "Грузов Глеб", roles.LOADER)
+
+
+@pytest.fixture
+def foreman(db):
+    """Бригадир: печать, приёмка и отгрузка."""
+    return make_employee(db, "Бригадов Борис", roles.FOREMAN)
+
+
+@pytest.fixture
+def admin(db):
+    return make_employee(db, "Админов Антон", roles.ADMIN)
 
 
 def make_article(db, code: str) -> Article:

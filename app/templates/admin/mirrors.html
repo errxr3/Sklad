@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Зеркала{% endblock %}
+{% block content %}
+<h1>Зеркала</h1>
+{% include "admin/_nav.html" %}
+
+<form method="get" action="/admin/mirrors" class="card">
+  <input name="q" type="search" value="{{ query }}" placeholder="Номер или артикул" autocomplete="off">
+  <div class="grid-2" style="margin-top:10px">
+    <select name="status">
+      <option value="">Любой статус</option>
+      {% for s in all_statuses %}
+        <option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ status_title(s) }}</option>
+      {% endfor %}
+    </select>
+    <select name="site_id">
+      <option value="0">Все площадки</option>
+      {% for s in sites %}
+        <option value="{{ s.id }}" {% if s.id == site_id %}selected{% endif %}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+    <select name="employee_id">
+      <option value="0">Любой сборщик</option>
+      {% for e in employees %}
+        <option value="{{ e.id }}" {% if e.id == employee_id %}selected{% endif %}>{{ e.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn" type="submit" style="margin-top:10px">Показать</button>
+</form>
+
+<p class="counter">Найдено: <b>{{ total }}</b></p>
+
+<div class="table-wrap card" style="padding:0">
+  <table>
+    <thead>
+      <tr><th>Номер</th><th>Артикул</th><th>Статус</th><th>Сборщик</th><th>Площадка</th><th>Исправить</th></tr>
+    </thead>
+    <tbody>
+      {% for m in mirrors %}
+        <tr>
+          <td><a class="mono" href="/mirror/{{ m.number }}">{{ m.number }}</a></td>
+          <td>{{ m.article.code }}</td>
+          <td><span class="pill {{ m.status }}">{{ m.status_title }}</span></td>
+          <td>{{ m.assembler.name }}</td>
+          <td>{{ m.site.name }}</td>
+          <td>
+            <form method="post" action="/admin/mirrors/{{ m.id }}/status" class="inline-form">
+              <div class="row-actions">
+                <select name="to_status" style="min-height:38px;font-size:14px;width:auto">
+                  {% for s in all_statuses %}
+                    {% if s != m.status %}<option value="{{ s }}">{{ status_title(s) }}</option>{% endif %}
+                  {% endfor %}
+                </select>
+                <input name="reason" type="text" placeholder="причина"
+                       style="width:120px;min-height:38px;font-size:14px;display:inline-block">
+                <button type="submit" class="danger">Применить</button>
+              </div>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="empty">Ничего не найдено.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="hint">Исправление статуса не стирает прошлые записи журнала —
+  добавляется новая, с пометкой, кто и почему исправил.</p>
+
+<div class="pager">
+  {% if offset > 0 %}
+    <a class="btn secondary" href="/admin/mirrors?q={{ query }}&amp;status={{ status }}&amp;site_id={{ site_id }}&amp;employee_id={{ employee_id }}&amp;offset={{ [offset - limit, 0] | max }}">Назад</a>
+  {% endif %}
+  {% if offset + limit < total %}
+    <a class="btn secondary" href="/admin/mirrors?q={{ query }}&amp;status={{ status }}&amp;site_id={{ site_id }}&amp;employee_id={{ employee_id }}&amp;offset={{ offset + limit }}">Дальше</a>
+  {% endif %}
+</div>
+{% endblock %}

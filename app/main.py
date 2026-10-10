@@ -7,11 +7,13 @@
 from __future__ import annotations
 
 import secrets
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, Form, Query, Request
+from fastapi import Depends, FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -19,7 +21,17 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 
-from . import __version__, config, labels, roles, scanlog, services, statuses
+from . import (
+    __version__,
+    admin_service,
+    config,
+    importer,
+    labels,
+    roles,
+    scanlog,
+    services,
+    statuses,
+)
 from .articles import format_number
 from .db import get_session, init_db
 from .models import Article, Employee, Site
@@ -75,6 +87,17 @@ templates.env.globals["perm"] = roles
 MAX_FLASH = 3
 
 
+THEME_COOKIE = "sklad_theme"
+THEMES = ("light", "dark")
+
+
+def _theme(request: Request) -> str:
+    """Выбранная тема. Храним в отдельной cookie, не в сессии:
+    она должна переживать выход из системы."""
+    value = request.cookies.get(THEME_COOKIE, "light")
+    return value if value in THEMES else "light"
+
+
 def flash(request: Request, text: str, ok: bool = True, only: bool = False) -> None:
     """Сообщение, которое покажется на следующей странице.
 
@@ -102,6 +125,8 @@ def _take_flashes(request: Request) -> list[dict]:
 
 def render(request: Request, template: str, **context) -> HTMLResponse:
     context.setdefault("messages", _take_flashes(request))
+    context.setdefault("theme", _theme(request))
+    context.setdefault("path", request.url.path)
     context.setdefault("employee", request.state.employee if hasattr(request.state, "employee") else None)
     context.setdefault("site", request.state.site if hasattr(request.state, "site") else None)
     return templates.TemplateResponse(request, template, context)
@@ -239,6 +264,23 @@ def login(
     return redirect("/")
 
 
+@app.post("/theme")
+def switch_theme(request: Request, back: str = Form("/")):
+    """Переключить светлую и тёмную тему. Выбор живёт в cookie на год."""
+    new_theme = "light" if _theme(request) == "dark" else "dark"
+    # Возвращаемся только на свой же адрес, чужие ссылки не принимаем.
+    target = back if back.startswith("/") and not back.startswith("//") else "/"
+    response = redirect(target)
+    response.set_cookie(
+        THEME_COOKIE,
+        new_theme,
+        max_age=365 * 24 * 3600,
+        samesite="lax",
+        httponly=False,
+    )
+    return response
+
+
 @app.post("/logout")
 def logout(request: Request):
     scanlog.clear(request.session.get("sid", ""))
@@ -262,6 +304,7 @@ def index(request: Request, who=Depends(current)):
         request,
         "index.html",
         waiting=services.waiting_for_receive(session, site),
+        in_stock=services.in_stock_count(session, site),
         articles_total=services.articles_count(session),
     )
 
@@ -410,17 +453,26 @@ def ship_scan(request: Request, code: str = Form(""), who=Depends(require(roles.
 
 
 @app.get("/stock", response_class=HTMLResponse)
-def stock_view(request: Request, q: str = Query(""), who=Depends(current)):
+def stock_view(
+    request: Request,
+    q: str = Query(""),
+    only: str = Query(""),
+    who=Depends(current),
+):
     employee, site, session = who
-    sites, rows, totals, grand = services.stock(session, q)
+    only_with_stock = only == "1"
+    sites, sections, totals, grand = services.stock(
+        session, q, only_with_stock=only_with_stock
+    )
     return render(
         request,
         "stock.html",
         sites=sites,
-        rows=rows,
+        sections=sections,
         totals=totals,
         grand=grand,
         query=q,
+        only_with_stock=only_with_stock,
     )
 
 
@@ -457,3 +509,251 @@ def mirror_view(request: Request, number: str, who=Depends(current)):
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok", "version": __version__, "time": datetime.now().isoformat()}
+
+
+# --- Админ-панель -----------------------------------------------------------
+
+admin_only = require(roles.ADMIN_PANEL, "Админ-панель")
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_home(request: Request, who=Depends(admin_only)):
+    employee, site, session = who
+    return render(
+        request,
+        "admin/index.html",
+        page="home",
+        data=admin_service.overview(session),
+        statuses=statuses,
+    )
+
+
+@app.get("/admin/employees", response_class=HTMLResponse)
+def admin_employees(request: Request, who=Depends(admin_only)):
+    employee, site, session = who
+    return render(
+        request,
+        "admin/employees.html",
+        page="employees",
+        employees=admin_service.all_employees(session),
+        roles_list=roles.ALL,
+    )
+
+
+@app.post("/admin/employees/add")
+def admin_employee_add(
+    request: Request,
+    name: str = Form(...),
+    pin: str = Form(...),
+    role: str = Form(...),
+    who=Depends(admin_only),
+):
+    employee, site, session = who
+    created = admin_service.create_employee(session, name=name, pin=pin, role=role)
+    flash(request, f"Заведён сотрудник {created.name} — {created.role_title}.")
+    return redirect("/admin/employees")
+
+
+@app.post("/admin/employees/{employee_id}/role")
+def admin_employee_role(
+    request: Request, employee_id: int, role: str = Form(...), who=Depends(admin_only)
+):
+    employee, site, session = who
+    changed = admin_service.change_role(session, employee_id, role)
+    flash(request, f"{changed.name}: роль изменена на «{changed.role_title}».")
+    return redirect("/admin/employees")
+
+
+@app.post("/admin/employees/{employee_id}/pin")
+def admin_employee_pin(
+    request: Request, employee_id: int, pin: str = Form(...), who=Depends(admin_only)
+):
+    employee, site, session = who
+    changed = admin_service.change_pin(session, employee_id, pin)
+    flash(request, f"{changed.name}: PIN изменён.")
+    return redirect("/admin/employees")
+
+
+@app.post("/admin/employees/{employee_id}/toggle")
+def admin_employee_toggle(request: Request, employee_id: int, who=Depends(admin_only)):
+    employee, site, session = who
+    changed = admin_service.toggle_employee(session, employee_id, by=employee)
+    state = "включён" if changed.is_active else "отключён"
+    flash(request, f"{changed.name}: {state}.")
+    return redirect("/admin/employees")
+
+
+@app.get("/admin/articles", response_class=HTMLResponse)
+def admin_articles(
+    request: Request,
+    q: str = Query(""),
+    offset: int = Query(0, ge=0),
+    who=Depends(admin_only),
+):
+    employee, site, session = who
+    limit = 100
+    items, total = admin_service.find_articles_admin(
+        session, q, limit=limit, offset=offset
+    )
+    return render(
+        request,
+        "admin/articles.html",
+        page="articles",
+        articles=items,
+        total=total,
+        query=q,
+        offset=offset,
+        limit=limit,
+        sheets=admin_service.sheets(session),
+    )
+
+
+@app.post("/admin/articles/add")
+def admin_article_add(
+    request: Request,
+    code: str = Form(...),
+    sheet: str = Form(""),
+    section: str = Form(""),
+    who=Depends(admin_only),
+):
+    employee, site, session = who
+    article = admin_service.add_article(session, code=code, sheet=sheet, section=section)
+    flash(
+        request,
+        f"Артикул «{article.code}» добавлен, буквы номера {article.group_letters}.",
+    )
+    return redirect("/admin/articles")
+
+
+@app.post("/admin/articles/{article_id}/toggle")
+def admin_article_toggle(request: Request, article_id: int, who=Depends(admin_only)):
+    employee, site, session = who
+    article = admin_service.toggle_article(session, article_id)
+    state = "включён" if article.is_active else "отключён"
+    flash(request, f"Артикул «{article.code}»: {state}.")
+    return redirect("/admin/articles")
+
+
+@app.post("/admin/articles/import")
+async def admin_articles_import(
+    request: Request,
+    upload: UploadFile = File(...),
+    who=Depends(admin_only),
+):
+    employee, site, session = who
+    suffix = Path(upload.filename or "").suffix.lower()
+    if suffix not in {".xlsx", ".xlsm", ".csv", ".txt"}:
+        flash(request, "Нужен файл .xlsx или .csv.", ok=False)
+        return redirect("/admin/articles")
+
+    # Загруженный файл кладём во временный, чтобы openpyxl читал его с диска.
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await upload.read())
+        tmp_path = Path(tmp.name)
+    try:
+        report = importer.import_articles(session, tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    flash(
+        request,
+        f"Загружено из {upload.filename}: новых {report.added}, "
+        f"уже было {report.already}, пропущено {report.skipped}.",
+    )
+    return redirect("/admin/articles")
+
+
+@app.get("/admin/mirrors", response_class=HTMLResponse)
+def admin_mirrors(
+    request: Request,
+    q: str = Query(""),
+    status: str = Query(""),
+    site_id: int = Query(0),
+    employee_id: int = Query(0),
+    offset: int = Query(0, ge=0),
+    who=Depends(admin_only),
+):
+    employee, site, session = who
+    limit = 100
+    items, total = admin_service.find_mirrors(
+        session,
+        query=q,
+        status=status,
+        site_id=site_id or None,
+        employee_id=employee_id or None,
+        limit=limit,
+        offset=offset,
+    )
+    return render(
+        request,
+        "admin/mirrors.html",
+        page="mirrors",
+        mirrors=items,
+        total=total,
+        query=q,
+        status=status,
+        site_id=site_id,
+        employee_id=employee_id,
+        offset=offset,
+        limit=limit,
+        sites=services.active_sites(session),
+        employees=admin_service.all_employees(session),
+        all_statuses=statuses.ALL,
+        statuses=statuses,
+    )
+
+
+@app.post("/admin/mirrors/{mirror_id}/status")
+def admin_mirror_status(
+    request: Request,
+    mirror_id: int,
+    to_status: str = Form(...),
+    reason: str = Form(""),
+    who=Depends(admin_only),
+):
+    employee, site, session = who
+    mirror = admin_service.correct_status(
+        session, mirror_id=mirror_id, to_status=to_status, by=employee, reason=reason
+    )
+    flash(
+        request,
+        f"{mirror.number}: статус исправлен на «{mirror.status_title}». "
+        "Запись добавлена в журнал.",
+    )
+    return redirect(request.headers.get("referer", "/admin/mirrors"))
+
+
+@app.get("/admin/journal", response_class=HTMLResponse)
+def admin_journal(
+    request: Request,
+    number: str = Query(""),
+    employee_id: int = Query(0),
+    status: str = Query(""),
+    offset: int = Query(0, ge=0),
+    who=Depends(admin_only),
+):
+    employee, site, session = who
+    limit = 100
+    items, total = admin_service.journal_filtered(
+        session,
+        number=number,
+        employee_id=employee_id or None,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    return render(
+        request,
+        "admin/journal.html",
+        page="journal",
+        items=items,
+        total=total,
+        number=number,
+        employee_id=employee_id,
+        status=status,
+        offset=offset,
+        limit=limit,
+        employees=admin_service.all_employees(session),
+        all_statuses=statuses.ALL,
+        statuses=statuses,
+    )

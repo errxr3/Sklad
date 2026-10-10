@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Журнал{% endblock %}
+{% block content %}
+<h1>Журнал движений</h1>
+{% include "admin/_nav.html" %}
+
+<form method="get" action="/admin/journal" class="card">
+  <input name="number" type="search" value="{{ number }}" placeholder="Номер зеркала"
+         autocomplete="off" autocapitalize="characters">
+  <div class="grid-2" style="margin-top:10px">
+    <select name="employee_id">
+      <option value="0">Любой сотрудник</option>
+      {% for e in employees %}
+        <option value="{{ e.id }}" {% if e.id == employee_id %}selected{% endif %}>{{ e.name }}</option>
+      {% endfor %}
+    </select>
+    <select name="status">
+      <option value="">Любое действие</option>
+      {% for s in all_statuses %}
+        <option value="{{ s }}" {% if s == status %}selected{% endif %}>→ {{ status_title(s) }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn" type="submit" style="margin-top:10px">Показать</button>
+</form>
+
+<p class="counter">Записей: <b>{{ total }}</b>. Журнал только пополняется.</p>
+
+<div class="table-wrap card" style="padding:0">
+  <table>
+    <thead><tr><th>Когда</th><th>Зеркало</th><th>Статус</th><th>Кто</th><th>Что было</th></tr></thead>
+    <tbody>
+      {% for item in items %}
+        <tr>
+          <td>{{ fmt(item.created_at) }}</td>
+          <td>
+            <a class="mono" href="/mirror/{{ item.mirror.number }}">{{ item.mirror.number }}</a><br>
+            <span class="hint">{{ item.mirror.article.code }}</span>
+          </td>
+          <td>{{ item.from_title }} → <span class="pill {{ item.to_status }}">{{ item.to_title }}</span></td>
+          <td>{{ item.employee.name }}<br><span class="hint">{{ item.site.name }}</span></td>
+          <td class="hint">{{ item.note or '—' }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">Записей нет.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="pager">
+  {% if offset > 0 %}
+    <a class="btn secondary" href="/admin/journal?number={{ number }}&amp;employee_id={{ employee_id }}&amp;status={{ status }}&amp;offset={{ [offset - limit, 0] | max }}">Новее</a>
+  {% endif %}
+  {% if offset + limit < total %}
+    <a class="btn secondary" href="/admin/journal?number={{ number }}&amp;employee_id={{ employee_id }}&amp;status={{ status }}&amp;offset={{ offset + limit }}">Старее</a>
+  {% endif %}
+</div>
+{% endblock %}

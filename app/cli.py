@@ -8,7 +8,7 @@
   list-employees               показать сотрудников
   import-articles ФАЙЛ         загрузить справочник из TOP.xlsx или CSV
   seed-demo-articles           завести несколько артикулов для проверки
-  seed-test-workers            завести двух тестовых сборщиков
+  seed-test-workers            завести тестовых сотрудников на каждую роль
   stats                        сводка по базе
 """
 
@@ -21,7 +21,7 @@ from pathlib import Path
 
 from sqlalchemy import func, select
 
-from . import statuses
+from . import roles, statuses
 from .articles import group_letters, match_key, normalize_code
 from .config import BASE_DIR
 from .db import SessionLocal, init_db
@@ -67,6 +67,13 @@ def cmd_gen_secret(_args: argparse.Namespace) -> int:
 
 def cmd_add_employee(args: argparse.Namespace) -> int:
     init_db()
+    if not roles.is_valid(args.role):
+        print(
+            f"Неизвестная роль «{args.role}». Доступны: "
+            + ", ".join(f"{r} ({roles.title(r)})" for r in roles.ALL),
+            file=sys.stderr,
+        )
+        return 1
     pin = args.pin or generate_pin()
     with SessionLocal() as session:
         exists = session.scalar(select(Employee).where(Employee.name == args.name))
@@ -75,7 +82,7 @@ def cmd_add_employee(args: argparse.Namespace) -> int:
             return 1
         session.add(Employee(name=args.name, pin_hash=hash_pin(pin), role=args.role))
         session.commit()
-    print("Сотрудник заведён.")
+    print(f"Сотрудник заведён, роль: {roles.title(args.role)}.")
     _print_pin(args.name, pin)
     return 0
 
@@ -102,7 +109,10 @@ def cmd_list_employees(_args: argparse.Namespace) -> int:
         return 0
     for employee in rows:
         state = "активен" if employee.is_active else "отключён"
-        print(f"  {employee.id:>3}  {employee.name:<30} {employee.role:<12} {state}")
+        print(
+            f"  {employee.id:>3}  {employee.name:<30} "
+            f"{roles.title(employee.role):<15} {state}"
+        )
     return 0
 
 
@@ -163,7 +173,14 @@ def cmd_seed_demo_articles(_args: argparse.Namespace) -> int:
     return 0
 
 
-TEST_WORKERS = ("Тестов Иван", "Пробин Пётр")
+# По одному сотруднику на каждую роль — чтобы было чем проверить разделение.
+TEST_WORKERS = (
+    ("Тестов Иван", roles.ASSEMBLER),
+    ("Пробин Пётр", roles.ASSEMBLER),
+    ("Грузов Глеб", roles.LOADER),
+    ("Бригадов Борис", roles.FOREMAN),
+    ("Админов Антон", roles.ADMIN),
+)
 
 
 def cmd_seed_test_workers(args: argparse.Namespace) -> int:
@@ -171,13 +188,13 @@ def cmd_seed_test_workers(args: argparse.Namespace) -> int:
     lines = ["PIN-коды тестовых сборщиков (файл в репозиторий не попадает)", ""]
     created: list[tuple[str, str]] = []
     with SessionLocal() as session:
-        for name in TEST_WORKERS:
+        for name, role in TEST_WORKERS:
             if session.scalar(select(Employee).where(Employee.name == name)):
                 print(f"Сотрудник «{name}» уже есть, пропускаю.")
                 continue
             pin = args.pin or generate_pin()
-            session.add(Employee(name=name, pin_hash=hash_pin(pin), role="assembler"))
-            created.append((name, pin))
+            session.add(Employee(name=name, pin_hash=hash_pin(pin), role=role))
+            created.append((f"{name} — {roles.title(role)}", pin))
         session.commit()
 
     if not created:
@@ -233,7 +250,13 @@ def build_parser() -> argparse.ArgumentParser:
     add = subparsers.add_parser("add-employee", help="завести сотрудника")
     add.add_argument("--name", required=True, help="фамилия и имя")
     add.add_argument("--pin", help="PIN-код; если не указан — будет сгенерирован")
-    add.add_argument("--role", default="assembler", help="роль, по умолчанию assembler")
+    add.add_argument(
+        "--role",
+        default=roles.ASSEMBLER,
+        choices=roles.ALL,
+        help="роль: assembler — сборщик, loader — грузчик, "
+        "foreman — бригадир, admin — администратор",
+    )
     add.set_defaults(func=cmd_add_employee)
 
     setpin = subparsers.add_parser("set-pin", help="сменить PIN сотрудника")
@@ -253,7 +276,9 @@ def build_parser() -> argparse.ArgumentParser:
         "seed-demo-articles", help="завести артикулы для проверки"
     ).set_defaults(func=cmd_seed_demo_articles)
 
-    workers = subparsers.add_parser("seed-test-workers", help="завести двух тестовых сборщиков")
+    workers = subparsers.add_parser(
+        "seed-test-workers", help="завести тестовых сотрудников на каждую роль"
+    )
     workers.add_argument("--pin", help="общий PIN для обоих; иначе у каждого свой случайный")
     workers.set_defaults(func=cmd_seed_test_workers)
 

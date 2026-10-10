@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import Site
-from tests.conftest import TEST_PIN, make_article
+from tests.conftest import TEST_PIN, make_article, make_employee
 
 
 @pytest.fixture
@@ -14,16 +14,38 @@ def client():
         yield test_client
 
 
-@pytest.fixture
-def logged_in(client, db, worker):
+def login_as(client, db, employee):
     site = db.query(Site).order_by(Site.sort_order).first()
     response = client.post(
         "/login",
-        data={"employee_id": worker.id, "pin": TEST_PIN, "site_id": site.id},
+        data={"employee_id": employee.id, "pin": TEST_PIN, "site_id": site.id},
         follow_redirects=False,
     )
     assert response.status_code == 303
     return client
+
+
+@pytest.fixture
+def logged_in(client, db, worker):
+    """Сборщик: печатает этикетки и принимает на склад."""
+    return login_as(client, db, worker)
+
+
+@pytest.fixture
+def as_foreman(client, db, foreman):
+    """Бригадир: может всё, кроме админки."""
+    return login_as(client, db, foreman)
+
+
+@pytest.fixture
+def as_loader(client, db, loader):
+    """Грузчик: только отгрузка."""
+    return login_as(client, db, loader)
+
+
+@pytest.fixture
+def as_admin(client, db, admin):
+    return login_as(client, db, admin)
 
 
 def test_без_входа_перекидывает_на_страницу_входа(client):
@@ -63,7 +85,8 @@ def test_выход(logged_in):
     assert logged_in.get("/", follow_redirects=False).status_code == 303
 
 
-def test_полный_сценарий_печать_приёмка_отгрузка(logged_in, db, article):
+def test_полный_сценарий_печать_приёмка_отгрузка(as_foreman, db, article):
+    logged_in = as_foreman
     # Выбор артикула
     page = logged_in.get("/make", params={"q": "600x800"})
     assert article.code in page.text
@@ -118,7 +141,8 @@ def test_повторный_скан_показывает_отказ(logged_in, 
     assert "log" in page.text and "уже" in page.text
 
 
-def test_отгрузка_без_приёмки_показывает_отказ(logged_in, article):
+def test_отгрузка_без_приёмки_показывает_отказ(as_foreman, article):
+    logged_in = as_foreman
     logged_in.post("/make", data={"article_id": article.id, "qty": "1"})
     logged_in.post("/ship", data={"code": "Z0000001"})
     page = logged_in.get("/ship")

@@ -1,21 +1,32 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Что делаем?</h1>
-
-<a class="btn big" href="/make">Сделал зеркало</a>
-<a class="btn big" href="/receive">Приёмка на склад{% if waiting %} ({{ waiting }}){% endif %}</a>
-<a class="btn big" href="/ship">Отгрузка</a>
+{% if employee.can(perm.MAKE) %}
+  <a class="btn big" href="/make">Сделал зеркало</a>
+{% endif %}
+{% if employee.can(perm.RECEIVE) %}
+  <a class="btn big" href="/receive">Приёмка на склад{% if waiting %} ({{ waiting }}){% endif %}</a>
+{% endif %}
+{% if employee.can(perm.SHIP) %}
+  <a class="btn big" href="/ship">Отгрузка{% if in_stock %} ({{ in_stock }}){% endif %}</a>
+{% endif %}
 <a class="btn secondary" href="/stock">Остатки</a>
 <a class="btn secondary" href="/journal">Журнал движений</a>
+{% if employee.can(perm.ADMIN_PANEL) %}
+  <a class="btn secondary" href="/admin">Админ-панель</a>
+{% endif %}
 
-{% if waiting %}
+{% if waiting and employee.can(perm.RECEIVE) %}
   <p class="hint">Напечатано, но ещё не принято на склад на площадке
     «{{ site.name }}»: <b>{{ waiting }}</b> шт.</p>
 {% endif %}
 {% if articles_total == 0 %}
   <div class="msg err" style="margin-top:14px">
-    Справочник артикулов пуст. Загрузите его командой
-    <span class="mono">python -m app.cli import-articles TOP.xlsx</span>
+    Справочник артикулов пуст.
+    {% if employee.can(perm.ADMIN_PANEL) %}
+      Загрузите его в <a href="/admin/articles">админ-панели</a>.
+    {% else %}
+      Попросите администратора загрузить его.
+    {% endif %}
   </div>
 {% endif %}
 

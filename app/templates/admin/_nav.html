@@ -1,0 +1,7 @@
+<nav class="admin-nav">
+  <a href="/admin" {% if page == 'home' %}class="active"{% endif %}>Сводка</a>
+  <a href="/admin/employees" {% if page == 'employees' %}class="active"{% endif %}>Сотрудники</a>
+  <a href="/admin/articles" {% if page == 'articles' %}class="active"{% endif %}>Артикулы</a>
+  <a href="/admin/mirrors" {% if page == 'mirrors' %}class="active"{% endif %}>Зеркала</a>
+  <a href="/admin/journal" {% if page == 'journal' %}class="active"{% endif %}>Журнал</a>
+</nav>
